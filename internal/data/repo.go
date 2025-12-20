@@ -218,6 +218,8 @@ type Repo struct {
 	staticsHost string
 }
 
+const timeLayoutMilli = "2006-01-02T15:04:05.000Z07:00"
+
 func NewDB(dsn string) (*sql.DB, error) {
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
@@ -383,6 +385,8 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 		var (
 			p             Post
 			dbID          int
+			publishedAt   sql.NullTime
+			updatedAt     sql.NullTime
 			heroImageID   sql.NullInt64
 			heroVideoID   sql.NullInt64
 			ogImageID     sql.NullInt64
@@ -401,8 +405,8 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 			&p.Style,
 			&p.IsMember,
 			&p.IsAdult,
-			&p.PublishedDate,
-			&p.UpdatedAt,
+			&publishedAt,
+			&updatedAt,
 			&p.HeroCaption,
 			&p.ExtendByline,
 			&heroImageID,
@@ -423,6 +427,12 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 			return nil, err
 		}
 		p.ID = strconv.Itoa(dbID)
+		if publishedAt.Valid {
+			p.PublishedDate = publishedAt.Time.UTC().Format(timeLayoutMilli)
+		}
+		if updatedAt.Valid {
+			p.UpdatedAt = updatedAt.Time.UTC().Format(timeLayoutMilli)
+		}
 		p.Brief = decodeJSONBytes(briefRaw)
 		p.Content = decodeJSONBytes(contentRaw)
 		p.TrimmedContent = p.Content
@@ -559,6 +569,8 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 	var (
 		p             Post
 		dbID          int
+		publishedAt   sql.NullTime
+		updatedAt     sql.NullTime
 		heroImageID   sql.NullInt64
 		heroVideoID   sql.NullInt64
 		ogImageID     sql.NullInt64
@@ -578,8 +590,8 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 		&p.Style,
 		&p.IsMember,
 		&p.IsAdult,
-		&p.PublishedDate,
-		&p.UpdatedAt,
+		&publishedAt,
+		&updatedAt,
 		&p.HeroCaption,
 		&p.ExtendByline,
 		&heroImageID,
@@ -604,6 +616,12 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 		return nil, err
 	}
 	p.ID = strconv.Itoa(dbID)
+	if publishedAt.Valid {
+		p.PublishedDate = publishedAt.Time.UTC().Format(timeLayoutMilli)
+	}
+	if updatedAt.Valid {
+		p.UpdatedAt = updatedAt.Time.UTC().Format(timeLayoutMilli)
+	}
 	p.Brief = decodeJSONBytes(briefRaw)
 	p.Content = decodeJSONBytes(contentRaw)
 	p.TrimmedContent = p.Content
@@ -712,10 +730,10 @@ func (r *Repo) QueryExternals(ctx context.Context, where *ExternalWhereInput, or
 		}
 		ext.ID = strconv.Itoa(dbID)
 		if pubAt.Valid {
-			ext.PublishedDate = pubAt.Time.UTC().Format(time.RFC3339)
+			ext.PublishedDate = pubAt.Time.UTC().Format(timeLayoutMilli)
 		}
 		if updAt.Valid {
-			ext.UpdatedAt = updAt.Time.UTC().Format(time.RFC3339)
+			ext.UpdatedAt = updAt.Time.UTC().Format(timeLayoutMilli)
 		}
 		externalIDs = append(externalIDs, dbID)
 		if partnerID.Valid {
