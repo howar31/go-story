@@ -8,6 +8,9 @@
   - `STATICS_HOST`：靜態圖片 host，例如 `https://v3-statics-dev.mirrormedia.mg/images`
 - **選填**
   - `PORT`：服務監聽埠，預設 `8080`
+  - `REDIS_ENABLED`：是否啟用 Redis cache，預設 `false`
+  - `REDIS_URL`：Redis 連線字串，例如 `redis://localhost:6379/0`（當 `REDIS_ENABLED=true` 時建議設定）
+  - `REDIS_TTL`：Cache TTL（秒），預設 `3600`（1 小時）
 
 ## 主要端點
 - `POST /api/graphql`：GraphQL 端點
@@ -29,8 +32,15 @@ export DATABASE_URL="postgres://user:pass@host/db?sslmode=disable"
 export STATICS_HOST="https://v3-statics-dev.mirrormedia.mg/images"
 export PORT=8080
 
+# 可選：啟用 Redis cache
+export REDIS_ENABLED=true
+export REDIS_URL="redis://localhost:6379/0"
+export REDIS_TTL=3600
+
 go run .
 ```
+
+**注意**：如果 `REDIS_ENABLED=true` 但 Redis 連線失敗，系統會自動將 cache 設為 disabled，不會影響服務運作。
 
 測試 `/probe` 範例：
 ```bash
@@ -45,6 +55,9 @@ docker build -t go-story:local .
 docker run --rm -p 8080:8080 \
   -e DATABASE_URL="postgres://user:pass@host/db?sslmode=disable" \
   -e STATICS_HOST="https://v3-statics-dev.mirrormedia.mg/images" \
+  -e REDIS_ENABLED=true \
+  -e REDIS_URL="redis://redis-host:6379/0" \
+  -e REDIS_TTL=3600 \
   go-story:local
 ```
 

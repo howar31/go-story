@@ -216,6 +216,7 @@ type OrderRule struct {
 type Repo struct {
 	db          *sql.DB
 	staticsHost string
+	cache       *Cache
 }
 
 const timeLayoutMilli = "2006-01-02T15:04:05.000Z07:00"
@@ -237,8 +238,8 @@ func NewDB(dsn string) (*sql.DB, error) {
 	return conn, nil
 }
 
-func NewRepo(db *sql.DB, staticsHost string) *Repo {
-	return &Repo{db: db, staticsHost: staticsHost}
+func NewRepo(db *sql.DB, staticsHost string, cache *Cache) *Repo {
+	return &Repo{db: db, staticsHost: staticsHost, cache: cache}
 }
 
 // Decode helpers
@@ -281,6 +282,20 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 	defer cancel()
 
 	where = ensurePostPublished(where)
+
+	// 嘗試從 cache 讀取
+	if r.cache != nil && r.cache.Enabled() {
+		cacheKey := GenerateCacheKey("posts", map[string]interface{}{
+			"where":  where,
+			"orders": orders,
+			"take":   take,
+			"skip":   skip,
+		})
+		var cachedPosts []Post
+		if found, _ := r.cache.Get(ctx, cacheKey, &cachedPosts); found {
+			return cachedPosts, nil
+		}
+	}
 
 	sb := strings.Builder{}
 	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo" FROM "Post" p`)
@@ -456,6 +471,18 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 	if err := r.enrichPosts(ctx, posts); err != nil {
 		return nil, err
 	}
+
+	// 寫入 cache
+	if r.cache != nil && r.cache.Enabled() {
+		cacheKey := GenerateCacheKey("posts", map[string]interface{}{
+			"where":  where,
+			"orders": orders,
+			"take":   take,
+			"skip":   skip,
+		})
+		_ = r.cache.Set(ctx, cacheKey, posts)
+	}
+
 	return posts, nil
 }
 
@@ -549,6 +576,15 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
+	// 嘗試從 cache 讀取
+	if r.cache != nil && r.cache.Enabled() {
+		cacheKey := GenerateCacheKey("post:unique", where)
+		var cachedPost *Post
+		if found, _ := r.cache.Get(ctx, cacheKey, &cachedPost); found {
+			return cachedPost, nil
+		}
+	}
+
 	sb := strings.Builder{}
 	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo" FROM "Post" p WHERE `)
 	args := []interface{}{}
@@ -638,6 +674,13 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 		return nil, err
 	}
 	p = posts[0]
+
+	// 寫入 cache
+	if r.cache != nil && r.cache.Enabled() {
+		cacheKey := GenerateCacheKey("post:unique", where)
+		_ = r.cache.Set(ctx, cacheKey, &p)
+	}
+
 	return &p, nil
 }
 
@@ -646,6 +689,20 @@ func (r *Repo) QueryExternals(ctx context.Context, where *ExternalWhereInput, or
 	defer cancel()
 
 	where = ensureExternalPublished(where)
+
+	// 嘗試從 cache 讀取
+	if r.cache != nil && r.cache.Enabled() {
+		cacheKey := GenerateCacheKey("externals", map[string]interface{}{
+			"where":  where,
+			"orders": orders,
+			"take":   take,
+			"skip":   skip,
+		})
+		var cachedExternals []External
+		if found, _ := r.cache.Get(ctx, cacheKey, &cachedExternals); found {
+			return cachedExternals, nil
+		}
+	}
 
 	sb := strings.Builder{}
 	sb.WriteString(`SELECT e.id, e.slug, e.title, e.state, e."publishedDate", e."extend_byline", e.thumb, e."thumbCaption", e.brief, e.content, e.partner, e."updatedAt" FROM "External" e`)
@@ -755,6 +812,18 @@ func (r *Repo) QueryExternals(ctx context.Context, where *ExternalWhereInput, or
 		idInt, _ := strconv.Atoi(result[i].ID)
 		result[i].Tags = tagsMap[idInt]
 	}
+
+	// 寫入 cache
+	if r.cache != nil && r.cache.Enabled() {
+		cacheKey := GenerateCacheKey("externals", map[string]interface{}{
+			"where":  where,
+			"orders": orders,
+			"take":   take,
+			"skip":   skip,
+		})
+		_ = r.cache.Set(ctx, cacheKey, result)
+	}
+
 	return result, nil
 }
 
