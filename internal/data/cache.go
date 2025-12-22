@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -28,13 +29,21 @@ func NewCache(redisURL string, enabled bool, ttlSeconds int) (*Cache, error) {
 		ttl:     time.Duration(ttlSeconds) * time.Second,
 	}
 
-	if !enabled || redisURL == "" {
+	if !enabled {
+		log.Printf("[Redis] Cache disabled (REDIS_ENABLED=false)")
 		return cache, nil
 	}
 
+	if redisURL == "" {
+		log.Printf("[Redis] Cache disabled (REDIS_URL not set)")
+		return cache, nil
+	}
+
+	log.Printf("[Redis] Initializing cache with URL: %s, TTL: %d seconds", redisURL, ttlSeconds)
+
 	opt, err := redis.ParseURL(redisURL)
 	if err != nil {
-		// 如果解析 URL 失敗，返回 disabled cache
+		log.Printf("[Redis] Failed to parse Redis URL: %v", err)
 		return cache, nil
 	}
 
@@ -45,13 +54,14 @@ func NewCache(redisURL string, enabled bool, ttlSeconds int) (*Cache, error) {
 	defer cancel()
 
 	if err := client.Ping(ctx).Err(); err != nil {
-		// 連線失敗，關閉 client 並返回 disabled cache
+		log.Printf("[Redis] Connection failed: %v", err)
 		_ = client.Close()
 		return cache, nil
 	}
 
 	cache.client = client
 	cache.enabled = true
+	log.Printf("[Redis] Cache enabled and connected successfully")
 	return cache, nil
 }
 
@@ -76,18 +86,22 @@ func (c *Cache) Get(ctx context.Context, key string, dest interface{}) (bool, er
 
 	val, err := c.client.Get(ctx, key).Result()
 	if errors.Is(err, redis.Nil) {
+		log.Printf("[Redis] Cache miss: %s", key)
 		return false, nil
 	}
 	if err != nil {
+		log.Printf("[Redis] Get error for key %s: %v (disabling cache)", key, err)
 		// 如果讀取失敗，可能是連線問題，將 enabled 設為 false
 		c.enabled = false
 		return false, nil
 	}
 
 	if err := json.Unmarshal([]byte(val), dest); err != nil {
+		log.Printf("[Redis] Unmarshal error for key %s: %v", key, err)
 		return false, fmt.Errorf("unmarshal cache value: %w", err)
 	}
 
+	log.Printf("[Redis] Cache hit: %s", key)
 	return true, nil
 }
 
@@ -99,15 +113,18 @@ func (c *Cache) Set(ctx context.Context, key string, value interface{}) error {
 
 	data, err := json.Marshal(value)
 	if err != nil {
+		log.Printf("[Redis] Marshal error for key %s: %v", key, err)
 		return fmt.Errorf("marshal cache value: %w", err)
 	}
 
 	if err := c.client.Set(ctx, key, data, c.ttl).Err(); err != nil {
+		log.Printf("[Redis] Set error for key %s: %v (disabling cache)", key, err)
 		// 如果寫入失敗，可能是連線問題，將 enabled 設為 false
 		c.enabled = false
 		return nil // 不返回錯誤，讓查詢繼續進行
 	}
 
+	log.Printf("[Redis] Cache set: %s (TTL: %v)", key, c.ttl)
 	return nil
 }
 
@@ -118,11 +135,13 @@ func (c *Cache) Delete(ctx context.Context, key string) error {
 	}
 
 	if err := c.client.Del(ctx, key).Err(); err != nil {
+		log.Printf("[Redis] Delete error for key %s: %v (disabling cache)", key, err)
 		// 如果刪除失敗，可能是連線問題，將 enabled 設為 false
 		c.enabled = false
 		return nil
 	}
 
+	log.Printf("[Redis] Cache deleted: %s", key)
 	return nil
 }
 
