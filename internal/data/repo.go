@@ -706,6 +706,8 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 	} else {
 		return nil, nil
 	}
+	// 只回傳 state = 'published' 的文章
+	sb.WriteString(" AND state = 'published'")
 	sb.WriteString(" LIMIT 1")
 
 	var (
