@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 // Config holds runtime configuration from environment.
@@ -34,6 +36,8 @@ type Config struct {
 // REDIS_URL is optional; required if REDIS_ENABLED=true.
 // REDIS_TTL is optional; defaults to 3600 seconds.
 func Load() (Config, error) {
+	_ = godotenv.Load()
+
 	cfg := Config{
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		StaticsHost: os.Getenv("STATICS_HOST"),
