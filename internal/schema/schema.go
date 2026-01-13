@@ -262,6 +262,23 @@ func Build(repo *data.Repo) (graphql.Schema, error) {
 		},
 	})
 
+	groupType := graphql.NewObject(graphql.ObjectConfig{
+		Name: "Group",
+		Fields: graphql.Fields{
+			"id":      &graphql.Field{Type: graphql.ID},
+			"keyword": &graphql.Field{Type: graphql.String},
+		},
+	})
+
+	userType := graphql.NewObject(graphql.ObjectConfig{
+		Name: "User",
+		Fields: graphql.Fields{
+			"id":    &graphql.Field{Type: graphql.ID},
+			"name":  &graphql.Field{Type: graphql.String},
+			"email": &graphql.Field{Type: graphql.String},
+		},
+	})
+
 	tagType := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Tag",
 		Fields: graphql.Fields{
@@ -739,17 +756,198 @@ func Build(repo *data.Repo) (graphql.Schema, error) {
 	externalType := graphql.NewObject(graphql.ObjectConfig{
 		Name: "External",
 		Fields: graphql.Fields{
-			"id":            &graphql.Field{Type: graphql.ID},
-			"slug":          &graphql.Field{Type: graphql.String},
-			"title":         &graphql.Field{Type: graphql.String},
-			"thumb":         &graphql.Field{Type: graphql.String},
-			"brief":         &graphql.Field{Type: graphql.String},
-			"content":       &graphql.Field{Type: graphql.String},
-			"publishedDate": &graphql.Field{Type: dateTimeScalar},
-			"extend_byline": &graphql.Field{Type: graphql.String},
-			"thumbCaption":  &graphql.Field{Type: graphql.String},
-			"partner":       &graphql.Field{Type: partnerType},
-			"updatedAt":     &graphql.Field{Type: dateTimeScalar},
+			"id":                  &graphql.Field{Type: graphql.ID},
+			"slug":                &graphql.Field{Type: graphql.String},
+			"title":               &graphql.Field{Type: graphql.String},
+			"state":               &graphql.Field{Type: graphql.String},
+			"publishedDate":       &graphql.Field{Type: dateTimeScalar},
+			"publishedDateString": &graphql.Field{Type: graphql.String},
+			"extend_byline":       &graphql.Field{Type: graphql.String},
+			"thumb":               &graphql.Field{Type: graphql.String},
+			"thumbCaption":        &graphql.Field{Type: graphql.String},
+			"brief":               &graphql.Field{Type: graphql.String},
+			"content":             &graphql.Field{Type: graphql.String},
+			"source":              &graphql.Field{Type: graphql.String},
+			"partner":             &graphql.Field{Type: partnerType},
+			"sections": &graphql.Field{
+				Type: graphql.NewList(sectionType),
+				Args: graphql.FieldConfigArgument{
+					"where": &graphql.ArgumentConfig{Type: sectionWhereInputType},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					where, err := decodeSectionWhere(p.Args["where"])
+					if err != nil {
+						return nil, err
+					}
+					return filterSections(current.Sections, where), nil
+				},
+			},
+			"sectionsCount": &graphql.Field{
+				Type: graphql.Int,
+				Args: graphql.FieldConfigArgument{
+					"where": &graphql.ArgumentConfig{Type: sectionWhereInputType},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					where, err := decodeSectionWhere(p.Args["where"])
+					if err != nil {
+						return nil, err
+					}
+					return len(filterSections(current.Sections, where)), nil
+				},
+			},
+			"categories": &graphql.Field{
+				Type: graphql.NewList(categoryType),
+				Args: graphql.FieldConfigArgument{
+					"where": &graphql.ArgumentConfig{Type: categoryWhereInputType},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					where, err := decodeCategoryWhere(p.Args["where"])
+					if err != nil {
+						return nil, err
+					}
+					return filterCategories(current.Categories, where), nil
+				},
+			},
+			"categoriesCount": &graphql.Field{
+				Type: graphql.Int,
+				Args: graphql.FieldConfigArgument{
+					"where": &graphql.ArgumentConfig{Type: categoryWhereInputType},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					where, err := decodeCategoryWhere(p.Args["where"])
+					if err != nil {
+						return nil, err
+					}
+					return len(filterCategories(current.Categories, where)), nil
+				},
+			},
+			"tags": &graphql.Field{
+				Type: graphql.NewList(tagType),
+				Args: graphql.FieldConfigArgument{
+					"where": &graphql.ArgumentConfig{Type: tagWhereInputType},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					where, err := data.DecodeTagWhere(p.Args["where"])
+					if err != nil {
+						return nil, err
+					}
+					return filterTags(current.Tags, where), nil
+				},
+			},
+			"tagsCount": &graphql.Field{
+				Type: graphql.Int,
+				Args: graphql.FieldConfigArgument{
+					"where": &graphql.ArgumentConfig{Type: tagWhereInputType},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					where, err := data.DecodeTagWhere(p.Args["where"])
+					if err != nil {
+						return nil, err
+					}
+					return len(filterTags(current.Tags, where)), nil
+				},
+			},
+			"tags_algo": &graphql.Field{
+				Type: graphql.NewList(tagType),
+				Args: graphql.FieldConfigArgument{
+					"where": &graphql.ArgumentConfig{Type: tagWhereInputType},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					where, err := data.DecodeTagWhere(p.Args["where"])
+					if err != nil {
+						return nil, err
+					}
+					return filterTags(current.TagsAlgo, where), nil
+				},
+			},
+			"tags_algoCount": &graphql.Field{
+				Type: graphql.Int,
+				Args: graphql.FieldConfigArgument{
+					"where": &graphql.ArgumentConfig{Type: tagWhereInputType},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					where, err := data.DecodeTagWhere(p.Args["where"])
+					if err != nil {
+						return nil, err
+					}
+					return len(filterTags(current.TagsAlgo, where)), nil
+				},
+			},
+			"relateds": &graphql.Field{
+				Type: graphql.NewList(postType),
+				Args: graphql.FieldConfigArgument{
+					"where":   &graphql.ArgumentConfig{Type: postWhereInputType},
+					"orderBy": &graphql.ArgumentConfig{Type: graphql.NewList(postOrderByInput)},
+					"take":    &graphql.ArgumentConfig{Type: graphql.Int},
+					"skip":    &graphql.ArgumentConfig{Type: graphql.Int},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					where, err := data.DecodePostWhere(p.Args["where"])
+					if err != nil {
+						return nil, err
+					}
+					orders := parseOrderRules(p.Args["orderBy"])
+					take, skip := parsePagination(p.Args)
+					return filterAndPaginatePosts(current.Relateds, where, orders, take, skip), nil
+				},
+			},
+			"relatedsCount": &graphql.Field{
+				Type: graphql.Int,
+				Args: graphql.FieldConfigArgument{
+					"where": &graphql.ArgumentConfig{Type: postWhereInputType},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					where, err := data.DecodePostWhere(p.Args["where"])
+					if err != nil {
+						return nil, err
+					}
+					return len(filterPosts(current.Relateds, where)), nil
+				},
+			},
+			"groups": &graphql.Field{
+				Type: graphql.NewList(groupType),
+				Args: graphql.FieldConfigArgument{
+					"where": &graphql.ArgumentConfig{Type: graphql.NewInputObject(graphql.InputObjectConfig{
+						Name: "GroupWhereInput",
+						Fields: graphql.InputObjectConfigFieldMap{
+							"_placeholder": &graphql.InputObjectFieldConfig{Type: graphql.String},
+						},
+					})},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					return current.Groups, nil
+				},
+			},
+			"groupsCount": &graphql.Field{
+				Type: graphql.Int,
+				Args: graphql.FieldConfigArgument{
+					"where": &graphql.ArgumentConfig{Type: graphql.NewInputObject(graphql.InputObjectConfig{
+						Name: "GroupWhereInput",
+						Fields: graphql.InputObjectConfigFieldMap{
+							"_placeholder": &graphql.InputObjectFieldConfig{Type: graphql.String},
+						},
+					})},
+				},
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					current := normalizeExternal(p.Source)
+					return len(current.Groups), nil
+				},
+			},
+			"createdAt": &graphql.Field{Type: dateTimeScalar},
+			"updatedAt": &graphql.Field{Type: dateTimeScalar},
+			"createdBy": &graphql.Field{Type: userType},
+			"updatedBy": &graphql.Field{Type: userType},
 		},
 	})
 
@@ -1205,6 +1403,20 @@ func normalizeTopic(src interface{}) data.Topic {
 		return *v
 	default:
 		return data.Topic{}
+	}
+}
+
+func normalizeExternal(src interface{}) data.External {
+	switch v := src.(type) {
+	case data.External:
+		return v
+	case *data.External:
+		if v == nil {
+			return data.External{}
+		}
+		return *v
+	default:
+		return data.External{}
 	}
 }
 

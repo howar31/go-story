@@ -60,6 +60,17 @@ type Contact struct {
 	Name string `json:"name"`
 }
 
+type Group struct {
+	ID      string `json:"id"`
+	Keyword string `json:"keyword"`
+}
+
+type User struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
 type Tag struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -167,21 +178,30 @@ type Post struct {
 }
 
 type External struct {
-	ID            string         `json:"id"`
-	Slug          string         `json:"slug"`
-	Partner       *Partner       `json:"partner"`
-	Title         string         `json:"title"`
-	State         string         `json:"state"`
-	PublishedDate string         `json:"publishedDate"`
-	ExtendByline  string         `json:"extend_byline"`
-	Thumb         string         `json:"thumb"`
-	ThumbCaption  string         `json:"thumbCaption"`
-	Brief         string         `json:"brief"`
-	Content       string         `json:"content"`
-	UpdatedAt     string         `json:"updatedAt"`
-	Tags          []Tag          `json:"tags"`
-	Relateds      []Post         `json:"relateds"`
-	Metadata      map[string]any `json:"metadata"`
+	ID                  string         `json:"id"`
+	Slug                string         `json:"slug"`
+	Partner             *Partner       `json:"partner"`
+	Title               string         `json:"title"`
+	State               string         `json:"state"`
+	PublishedDate       string         `json:"publishedDate"`
+	PublishedDateString string         `json:"publishedDateString"`
+	ExtendByline        string         `json:"extend_byline"`
+	Thumb               string         `json:"thumb"`
+	ThumbCaption        string         `json:"thumbCaption"`
+	Brief               string         `json:"brief"`
+	Content             string         `json:"content"`
+	Source              string         `json:"source"`
+	Tags                []Tag          `json:"tags"`
+	TagsAlgo            []Tag          `json:"tags_algo"`
+	Sections            []Section      `json:"sections"`
+	Categories          []Category     `json:"categories"`
+	Relateds            []Post         `json:"relateds"`
+	Groups              []Group        `json:"groups"`
+	CreatedAt           string         `json:"createdAt"`
+	UpdatedAt           string         `json:"updatedAt"`
+	CreatedBy           *User          `json:"createdBy"`
+	UpdatedBy           *User          `json:"updatedBy"`
+	Metadata            map[string]any `json:"metadata"`
 }
 
 // Filters
@@ -813,7 +833,7 @@ func (r *Repo) QueryExternals(ctx context.Context, where *ExternalWhereInput, or
 	}
 
 	sb := strings.Builder{}
-	sb.WriteString(`SELECT e.id, e.slug, e.title, e.state, e."publishedDate", e."extend_byline", e.thumb, e."thumbCaption", e.brief, e.content, e.partner, e."updatedAt" FROM "External" e`)
+	sb.WriteString(`SELECT e.id, e.slug, e.title, e.state, e."publishedDate", e."publishedDateString", e."extend_byline", e.thumb, e."thumbCaption", e.brief, e.content, e.source, e.partner, e."createdAt", e."updatedAt" FROM "External" e`)
 
 	conds := []string{}
 	args := []interface{}{}
@@ -889,20 +909,30 @@ func (r *Repo) QueryExternals(ctx context.Context, where *ExternalWhereInput, or
 		var ext External
 		var partnerID sql.NullInt64
 		var dbID int
-		var pubAt, updAt sql.NullTime
-		if err := rows.Scan(&dbID, &ext.Slug, &ext.Title, &ext.State, &pubAt, &ext.ExtendByline, &ext.Thumb, &ext.ThumbCaption, &ext.Brief, &ext.Content, &partnerID, &updAt); err != nil {
+		var pubAt, createdAt, updAt sql.NullTime
+		var publishedDateString sql.NullString
+		if err := rows.Scan(&dbID, &ext.Slug, &ext.Title, &ext.State, &pubAt, &publishedDateString, &ext.ExtendByline, &ext.Thumb, &ext.ThumbCaption, &ext.Brief, &ext.Content, &ext.Source, &partnerID, &createdAt, &updAt); err != nil {
 			return nil, err
 		}
 		ext.ID = strconv.Itoa(dbID)
 		if pubAt.Valid {
 			ext.PublishedDate = pubAt.Time.UTC().Format(timeLayoutMilli)
 		}
+		if publishedDateString.Valid {
+			ext.PublishedDateString = publishedDateString.String
+		}
+		if createdAt.Valid {
+			ext.CreatedAt = createdAt.Time.UTC().Format(timeLayoutMilli)
+		}
 		if updAt.Valid {
 			ext.UpdatedAt = updAt.Time.UTC().Format(timeLayoutMilli)
 		}
 		externalIDs = append(externalIDs, dbID)
 		if partnerID.Valid {
-			ext.Metadata = map[string]any{"partnerID": int(partnerID.Int64)}
+			if ext.Metadata == nil {
+				ext.Metadata = map[string]any{}
+			}
+			ext.Metadata["partnerID"] = int(partnerID.Int64)
 			partnerIDs = append(partnerIDs, int(partnerID.Int64))
 		}
 		result = append(result, ext)
@@ -913,12 +943,22 @@ func (r *Repo) QueryExternals(ctx context.Context, where *ExternalWhereInput, or
 
 	partners, _ := r.fetchPartners(ctx, partnerIDs)
 	tagsMap, _ := r.fetchExternalTags(ctx, "_External_tags", externalIDs)
+	tagsAlgoMap, _ := r.fetchExternalTags(ctx, "_External_tags_algo", externalIDs)
+	sectionsMap, _ := r.fetchExternalSections(ctx, externalIDs)
+	categoriesMap, _ := r.fetchExternalCategories(ctx, externalIDs)
+	groupsMap, _ := r.fetchExternalGroups(ctx, externalIDs)
+	relatedsMap, _ := r.fetchExternalRelateds(ctx, externalIDs)
 	for i := range result {
 		if pid := getMetaInt(result[i].Metadata, "partnerID"); pid > 0 {
 			result[i].Partner = partners[pid]
 		}
 		idInt, _ := strconv.Atoi(result[i].ID)
 		result[i].Tags = tagsMap[idInt]
+		result[i].TagsAlgo = tagsAlgoMap[idInt]
+		result[i].Sections = sectionsMap[idInt]
+		result[i].Categories = categoriesMap[idInt]
+		result[i].Groups = groupsMap[idInt]
+		result[i].Relateds = relatedsMap[idInt]
 	}
 
 	// 寫入 cache
@@ -2008,6 +2048,105 @@ func (r *Repo) fetchTopicTags(ctx context.Context, topicIDs []int) (map[int][]Ta
 			return result, err
 		}
 		result[tid] = append(result[tid], tg)
+	}
+	return result, rows.Err()
+}
+
+func (r *Repo) fetchExternalSections(ctx context.Context, externalIDs []int) (map[int][]Section, error) {
+	result := map[int][]Section{}
+	if len(externalIDs) == 0 {
+		return result, nil
+	}
+	query := `SELECT es."A" as external_id, s.id, s.name, s.slug, s.state FROM "_External_sections" es JOIN "Section" s ON s.id = es."B" WHERE es."A" = ANY($1)`
+	rows, err := r.db.QueryContext(ctx, query, pqIntArray(externalIDs))
+	if err != nil {
+		return result, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var eid int
+		var s Section
+		if err := rows.Scan(&eid, &s.ID, &s.Name, &s.Slug, &s.State); err != nil {
+			return result, err
+		}
+		result[eid] = append(result[eid], s)
+	}
+	return result, rows.Err()
+}
+
+func (r *Repo) fetchExternalCategories(ctx context.Context, externalIDs []int) (map[int][]Category, error) {
+	result := map[int][]Category{}
+	if len(externalIDs) == 0 {
+		return result, nil
+	}
+	query := `SELECT ce."B" as external_id, c.id, c.name, c.slug, c.state, c."isMemberOnly" FROM "_Category_externals" ce JOIN "Category" c ON c.id = ce."A" WHERE ce."B" = ANY($1)`
+	rows, err := r.db.QueryContext(ctx, query, pqIntArray(externalIDs))
+	if err != nil {
+		return result, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var eid int
+		var c Category
+		if err := rows.Scan(&eid, &c.ID, &c.Name, &c.Slug, &c.State, &c.IsMemberOnly); err != nil {
+			return result, err
+		}
+		result[eid] = append(result[eid], c)
+	}
+	return result, rows.Err()
+}
+
+func (r *Repo) fetchExternalGroups(ctx context.Context, externalIDs []int) (map[int][]Group, error) {
+	result := map[int][]Group{}
+	if len(externalIDs) == 0 {
+		return result, nil
+	}
+	query := `SELECT eg."A" as external_id, g.id, g.keyword FROM "_External_groups" eg JOIN "Group" g ON g.id = eg."B" WHERE eg."A" = ANY($1)`
+	rows, err := r.db.QueryContext(ctx, query, pqIntArray(externalIDs))
+	if err != nil {
+		return result, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var eid int
+		var g Group
+		var dbID int
+		if err := rows.Scan(&eid, &dbID, &g.Keyword); err != nil {
+			return result, err
+		}
+		g.ID = strconv.Itoa(dbID)
+		result[eid] = append(result[eid], g)
+	}
+	return result, rows.Err()
+}
+
+func (r *Repo) fetchExternalRelateds(ctx context.Context, externalIDs []int) (map[int][]Post, error) {
+	result := map[int][]Post{}
+	if len(externalIDs) == 0 {
+		return result, nil
+	}
+	query := `SELECT er."A" as external_id, p.id, p.slug, p.title, p."heroImage" FROM "_External_relateds" er JOIN "Post" p ON p.id = er."B" WHERE er."A" = ANY($1) AND p.state = 'published'`
+	rows, err := r.db.QueryContext(ctx, query, pqIntArray(externalIDs))
+	if err != nil {
+		return result, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var eid int
+		var rp Post
+		var dbID int
+		var heroID sql.NullInt64
+		if err := rows.Scan(&eid, &dbID, &rp.Slug, &rp.Title, &heroID); err != nil {
+			return result, err
+		}
+		rp.ID = strconv.Itoa(dbID)
+		if heroID.Valid {
+			if rp.Metadata == nil {
+				rp.Metadata = map[string]any{}
+			}
+			rp.Metadata["heroImageID"] = int(heroID.Int64)
+		}
+		result[eid] = append(result[eid], rp)
 	}
 	return result, rows.Err()
 }
