@@ -175,6 +175,13 @@ func Build(repo *data.Repo) (graphql.Schema, error) {
 		},
 	})
 
+	groupWhereInputType := graphql.NewInputObject(graphql.InputObjectConfig{
+		Name: "GroupWhereInput",
+		Fields: graphql.InputObjectConfigFieldMap{
+			"_placeholder": &graphql.InputObjectFieldConfig{Type: graphql.String},
+		},
+	})
+
 	tagWhereInputType := graphql.NewInputObject(graphql.InputObjectConfig{
 		Name: "TagWhereInput",
 		Fields: graphql.InputObjectConfigFieldMap{
@@ -917,12 +924,7 @@ func Build(repo *data.Repo) (graphql.Schema, error) {
 			"groups": &graphql.Field{
 				Type: graphql.NewList(groupType),
 				Args: graphql.FieldConfigArgument{
-					"where": &graphql.ArgumentConfig{Type: graphql.NewInputObject(graphql.InputObjectConfig{
-						Name: "GroupWhereInput",
-						Fields: graphql.InputObjectConfigFieldMap{
-							"_placeholder": &graphql.InputObjectFieldConfig{Type: graphql.String},
-						},
-					})},
+					"where": &graphql.ArgumentConfig{Type: groupWhereInputType},
 				},
 				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 					current := normalizeExternal(p.Source)
@@ -932,12 +934,7 @@ func Build(repo *data.Repo) (graphql.Schema, error) {
 			"groupsCount": &graphql.Field{
 				Type: graphql.Int,
 				Args: graphql.FieldConfigArgument{
-					"where": &graphql.ArgumentConfig{Type: graphql.NewInputObject(graphql.InputObjectConfig{
-						Name: "GroupWhereInput",
-						Fields: graphql.InputObjectConfigFieldMap{
-							"_placeholder": &graphql.InputObjectFieldConfig{Type: graphql.String},
-						},
-					})},
+					"where": &graphql.ArgumentConfig{Type: groupWhereInputType},
 				},
 				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 					current := normalizeExternal(p.Source)
