@@ -1669,12 +1669,30 @@ func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 		}
 		if r1 := getMetaInt(p.Metadata, "relatedsOneID"); r1 > 0 {
 			if rp, ok := relatedSinglePosts[r1]; ok {
+				if idImg := getMetaInt(rp.Metadata, "heroImageID"); idImg > 0 {
+					rp.HeroImage = imageMap[idImg]
+				}
 				p.RelatedsOne = &rp
 			}
 		}
 		if r2 := getMetaInt(p.Metadata, "relatedsTwoID"); r2 > 0 {
 			if rp, ok := relatedSinglePosts[r2]; ok {
+				if idImg := getMetaInt(rp.Metadata, "heroImageID"); idImg > 0 {
+					rp.HeroImage = imageMap[idImg]
+				}
 				p.RelatedsTwo = &rp
+			}
+		}
+
+		// Set heroImage for related posts
+		for j := range p.Relateds {
+			if idImg := getMetaInt(p.Relateds[j].Metadata, "heroImageID"); idImg > 0 {
+				p.Relateds[j].HeroImage = imageMap[idImg]
+			}
+		}
+		for j := range p.RelatedsInInputOrder {
+			if idImg := getMetaInt(p.RelatedsInInputOrder[j].Metadata, "heroImageID"); idImg > 0 {
+				p.RelatedsInInputOrder[j].HeroImage = imageMap[idImg]
 			}
 		}
 	}
