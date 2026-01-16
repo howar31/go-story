@@ -1861,12 +1861,12 @@ func (r *Repo) fetchRelatedPosts(ctx context.Context, postIDs []int) (map[int][]
 		SELECT r."A" as post_id, p.id, p.slug, p.title, p."heroImage"
 		FROM "_Post_relateds" r
 		JOIN "Post" p ON p.id = r."B"
-		WHERE r."A" = ANY($1)
+		WHERE r."A" = ANY($1) AND p.state = 'published'
 		UNION
 		SELECT r."B" as post_id, p.id, p.slug, p.title, p."heroImage"
 		FROM "_Post_relateds" r
 		JOIN "Post" p ON p.id = r."A"
-		WHERE r."B" = ANY($1)
+		WHERE r."B" = ANY($1) AND p.state = 'published'
 	`
 	rows, err := r.db.QueryContext(ctx, query, pqIntArray(postIDs))
 	if err != nil {
@@ -1897,7 +1897,7 @@ func (r *Repo) fetchPostsByIDs(ctx context.Context, ids []int) ([]Post, []int, e
 	if len(ids) == 0 {
 		return result, imageIDs, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1)`, pqIntArray(ids))
+	rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1) AND state = 'published'`, pqIntArray(ids))
 	if err != nil {
 		return result, imageIDs, err
 	}
