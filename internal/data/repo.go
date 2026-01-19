@@ -132,49 +132,50 @@ type Topic struct {
 }
 
 type Post struct {
-	ID                     string         `json:"id"`
-	Slug                   string         `json:"slug"`
-	Title                  string         `json:"title"`
-	Subtitle               string         `json:"subtitle"`
-	State                  string         `json:"state"`
-	Style                  string         `json:"style"`
-	PublishedDate          string         `json:"publishedDate"`
-	UpdatedAt              string         `json:"updatedAt"`
-	IsMember               bool           `json:"isMember"`
-	IsAdult                bool           `json:"isAdult"`
-	Sections               []Section      `json:"sections"`
-	SectionsInInputOrder   []Section      `json:"sectionsInInputOrder"`
-	Categories             []Category     `json:"categories"`
-	CategoriesInInputOrder []Category     `json:"categoriesInInputOrder"`
-	Writers                []Contact      `json:"writers"`
-	WritersInInputOrder    []Contact      `json:"writersInInputOrder"`
-	Photographers          []Contact      `json:"photographers"`
-	CameraMan              []Contact      `json:"camera_man"`
-	Designers              []Contact      `json:"designers"`
-	Engineers              []Contact      `json:"engineers"`
-	Vocals                 []Contact      `json:"vocals"`
-	ExtendByline           string         `json:"extend_byline"`
-	Tags                   []Tag          `json:"tags"`
-	TagsAlgo               []Tag          `json:"tags_algo"`
-	HeroVideo              *Video         `json:"heroVideo"`
-	HeroImage              *Photo         `json:"heroImage"`
-	HeroCaption            string         `json:"heroCaption"`
-	Brief                  map[string]any `json:"brief"`
-	TrimmedContent         map[string]any `json:"trimmedContent"`
-	Content                map[string]any `json:"content"`
-	Relateds               []Post         `json:"relateds"`
-	RelatedsInInputOrder   []Post         `json:"relatedsInInputOrder"`
-	RelatedsOne            *Post          `json:"relatedsOne"`
-	RelatedsTwo            *Post          `json:"relatedsTwo"`
-	Redirect               string         `json:"redirect"`
-	OgTitle                string         `json:"og_title"`
-	OgImage                *Photo         `json:"og_image"`
-	OgDescription          string         `json:"og_description"`
-	HiddenAdvertised       bool           `json:"hiddenAdvertised"`
-	IsAdvertised           bool           `json:"isAdvertised"`
-	IsFeatured             bool           `json:"isFeatured"`
-	Topics                 *Topic         `json:"topics"`
-	Metadata               map[string]any `json:"-"`
+	ID                     string           `json:"id"`
+	Slug                   string           `json:"slug"`
+	Title                  string           `json:"title"`
+	Subtitle               string           `json:"subtitle"`
+	State                  string           `json:"state"`
+	Style                  string           `json:"style"`
+	PublishedDate          string           `json:"publishedDate"`
+	UpdatedAt              string           `json:"updatedAt"`
+	IsMember               bool             `json:"isMember"`
+	IsAdult                bool             `json:"isAdult"`
+	Sections               []Section        `json:"sections"`
+	SectionsInInputOrder   []Section        `json:"sectionsInInputOrder"`
+	Categories             []Category       `json:"categories"`
+	CategoriesInInputOrder []Category       `json:"categoriesInInputOrder"`
+	Writers                []Contact        `json:"writers"`
+	WritersInInputOrder    []Contact        `json:"writersInInputOrder"`
+	Photographers          []Contact        `json:"photographers"`
+	CameraMan              []Contact        `json:"camera_man"`
+	Designers              []Contact        `json:"designers"`
+	Engineers              []Contact        `json:"engineers"`
+	Vocals                 []Contact        `json:"vocals"`
+	ExtendByline           string           `json:"extend_byline"`
+	Tags                   []Tag            `json:"tags"`
+	TagsAlgo               []Tag            `json:"tags_algo"`
+	HeroVideo              *Video           `json:"heroVideo"`
+	HeroImage              *Photo           `json:"heroImage"`
+	HeroCaption            string           `json:"heroCaption"`
+	Brief                  map[string]any   `json:"brief"`
+	TrimmedContent         map[string]any   `json:"trimmedContent"`
+	Content                map[string]any   `json:"content"`
+	Relateds               []Post           `json:"relateds"`
+	RelatedsInInputOrder   []Post           `json:"relatedsInInputOrder"`
+	RelatedsOne            *Post            `json:"relatedsOne"`
+	RelatedsTwo            *Post            `json:"relatedsTwo"`
+	Redirect               string           `json:"redirect"`
+	OgTitle                string           `json:"og_title"`
+	OgImage                *Photo           `json:"og_image"`
+	OgDescription          string           `json:"og_description"`
+	HiddenAdvertised       bool             `json:"hiddenAdvertised"`
+	IsAdvertised           bool             `json:"isAdvertised"`
+	IsFeatured             bool             `json:"isFeatured"`
+	Topics                 *Topic           `json:"topics"`
+	ManualOrderOfRelateds  []map[string]any `json:"-"`
+	Metadata               map[string]any   `json:"-"`
 }
 
 type External struct {
@@ -424,7 +425,7 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 	}
 
 	sb := strings.Builder{}
-	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo" FROM "Post" p`)
+	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo", "manualOrderOfRelateds" FROM "Post" p`)
 
 	conds := []string{}
 	args := []interface{}{}
@@ -524,18 +525,19 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 	posts := []Post{}
 	for rows.Next() {
 		var (
-			p             Post
-			dbID          int
-			publishedAt   sql.NullTime
-			updatedAt     sql.NullTime
-			heroImageID   sql.NullInt64
-			heroVideoID   sql.NullInt64
-			ogImageID     sql.NullInt64
-			topicsID      sql.NullInt64
-			relatedsOneID sql.NullInt64
-			relatedsTwoID sql.NullInt64
-			briefRaw      []byte
-			contentRaw    []byte
+			p                        Post
+			dbID                     int
+			publishedAt              sql.NullTime
+			updatedAt                sql.NullTime
+			heroImageID              sql.NullInt64
+			heroVideoID              sql.NullInt64
+			ogImageID                sql.NullInt64
+			topicsID                 sql.NullInt64
+			relatedsOneID            sql.NullInt64
+			relatedsTwoID            sql.NullInt64
+			briefRaw                 []byte
+			contentRaw               []byte
+			manualOrderOfRelatedsRaw []byte
 		)
 		if err := rows.Scan(
 			&dbID,
@@ -564,6 +566,7 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 			&ogImageID,
 			&relatedsOneID,
 			&relatedsTwoID,
+			&manualOrderOfRelatedsRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -577,6 +580,7 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 		p.Brief = decodeJSONBytes(briefRaw)
 		p.Content = decodeJSONBytes(contentRaw)
 		p.TrimmedContent = p.Content
+		p.ManualOrderOfRelateds = decodeJSONArray(manualOrderOfRelatedsRaw)
 		p.Metadata = map[string]any{
 			"heroImageID":   nullableInt(heroImageID),
 			"ogImageID":     nullableInt(ogImageID),
@@ -712,7 +716,7 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 	}
 
 	sb := strings.Builder{}
-	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo" FROM "Post" p WHERE `)
+	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo", "manualOrderOfRelateds" FROM "Post" p WHERE `)
 	args := []interface{}{}
 	argIdx := 1
 	if where.ID != nil {
@@ -731,18 +735,19 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 	sb.WriteString(" LIMIT 1")
 
 	var (
-		p             Post
-		dbID          int
-		publishedAt   sql.NullTime
-		updatedAt     sql.NullTime
-		heroImageID   sql.NullInt64
-		heroVideoID   sql.NullInt64
-		ogImageID     sql.NullInt64
-		topicsID      sql.NullInt64
-		relatedsOneID sql.NullInt64
-		relatedsTwoID sql.NullInt64
-		briefRaw      []byte
-		contentRaw    []byte
+		p                        Post
+		dbID                     int
+		publishedAt              sql.NullTime
+		updatedAt                sql.NullTime
+		heroImageID              sql.NullInt64
+		heroVideoID              sql.NullInt64
+		ogImageID                sql.NullInt64
+		topicsID                 sql.NullInt64
+		relatedsOneID            sql.NullInt64
+		relatedsTwoID            sql.NullInt64
+		briefRaw                 []byte
+		contentRaw               []byte
+		manualOrderOfRelatedsRaw []byte
 	)
 
 	err := r.db.QueryRowContext(ctx, sb.String(), args...).Scan(
@@ -772,6 +777,7 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 		&ogImageID,
 		&relatedsOneID,
 		&relatedsTwoID,
+		&manualOrderOfRelatedsRaw,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -789,6 +795,7 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 	p.Brief = decodeJSONBytes(briefRaw)
 	p.Content = decodeJSONBytes(contentRaw)
 	p.TrimmedContent = p.Content
+	p.ManualOrderOfRelateds = decodeJSONArray(manualOrderOfRelatedsRaw)
 	p.Metadata = map[string]any{
 		"heroImageID":   nullableInt(heroImageID),
 		"ogImageID":     nullableInt(ogImageID),
@@ -1472,6 +1479,17 @@ func decodeJSONBytes(raw []byte) map[string]any {
 	return m
 }
 
+func decodeJSONArray(raw []byte) []map[string]any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var arr []map[string]any
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return nil
+	}
+	return arr
+}
+
 func nullableInt(v sql.NullInt64) int {
 	if v.Valid {
 		return int(v.Int64)
@@ -1586,6 +1604,21 @@ func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 	}
 	imageIDs := append([]int{}, relatedImageIDs...)
 
+	// Fetch relatedsInInputOrder based on manualOrderOfRelateds for each post
+	relatedsInInputOrderMap := make(map[int][]Post)
+	relatedsInInputOrderImageIDs := []int{}
+	for _, p := range posts {
+		id, _ := strconv.Atoi(p.ID)
+		relatedsInOrder, imgIDs, err := r.fetchRelatedsByManualOrder(ctx, p.ManualOrderOfRelateds)
+		if err != nil {
+			// Log error but continue
+			continue
+		}
+		relatedsInInputOrderMap[id] = relatedsInOrder
+		relatedsInInputOrderImageIDs = append(relatedsInInputOrderImageIDs, imgIDs...)
+	}
+	imageIDs = append(imageIDs, relatedsInInputOrderImageIDs...)
+
 	relatedOneIDs := []int{}
 	relatedTwoIDs := []int{}
 	for _, p := range posts {
@@ -1652,7 +1685,10 @@ func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 		p.Tags = tagsMap[id]
 		p.TagsAlgo = tagsAlgoMap[id]
 		p.Relateds = relatedsMap[id]
-		p.RelatedsInInputOrder = relatedsMap[id]
+		p.RelatedsInInputOrder = relatedsInInputOrderMap[id]
+		if p.RelatedsInInputOrder == nil {
+			p.RelatedsInInputOrder = []Post{}
+		}
 		if idImg := getMetaInt(p.Metadata, "heroImageID"); idImg > 0 {
 			p.HeroImage = imageMap[idImg]
 		}
@@ -1917,6 +1953,70 @@ func (r *Repo) fetchPostsByIDs(ctx context.Context, ids []int) ([]Post, []int, e
 		result = append(result, p)
 	}
 	return result, imageIDs, rows.Err()
+}
+
+func (r *Repo) fetchRelatedsByManualOrder(ctx context.Context, manualOrder []map[string]any) ([]Post, []int, error) {
+	result := []Post{}
+	imageIDs := []int{}
+
+	// If manualOrder is empty, return empty array (matching Lilith behavior)
+	if len(manualOrder) == 0 {
+		return result, imageIDs, nil
+	}
+
+	// Extract ids from manualOrder
+	ids := []int{}
+	for _, item := range manualOrder {
+		if idStr, ok := item["id"].(string); ok {
+			if id, err := strconv.Atoi(idStr); err == nil {
+				ids = append(ids, id)
+			}
+		}
+	}
+
+	if len(ids) == 0 {
+		return result, imageIDs, nil
+	}
+
+	// Query posts by ids
+	rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1) AND state = 'published'`, pqIntArray(ids))
+	if err != nil {
+		return result, imageIDs, err
+	}
+	defer rows.Close()
+
+	// Create a map of id -> Post for quick lookup
+	postsMap := make(map[int]Post)
+	for rows.Next() {
+		var p Post
+		var dbID int
+		var hero sql.NullInt64
+		if err := rows.Scan(&dbID, &p.Slug, &p.Title, &hero); err != nil {
+			return result, imageIDs, err
+		}
+		p.ID = strconv.Itoa(dbID)
+		if hero.Valid {
+			imageIDs = append(imageIDs, int(hero.Int64))
+			p.Metadata = map[string]any{"heroImageID": int(hero.Int64)}
+		}
+		postsMap[dbID] = p
+	}
+	if err := rows.Err(); err != nil {
+		return result, imageIDs, err
+	}
+
+	// Sort according to manualOrder
+	for _, item := range manualOrder {
+		if idStr, ok := item["id"].(string); ok {
+			if id, err := strconv.Atoi(idStr); err == nil {
+				if p, exists := postsMap[id]; exists {
+					result = append(result, p)
+				}
+			}
+		}
+	}
+
+	return result, imageIDs, nil
 }
 
 func (r *Repo) fetchVideos(ctx context.Context, videoIDs []int) (map[int]*Video, []int, error) {
