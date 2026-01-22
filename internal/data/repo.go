@@ -954,7 +954,11 @@ func (r *Repo) QueryExternals(ctx context.Context, where *ExternalWhereInput, or
 	sectionsMap, _ := r.fetchExternalSections(ctx, externalIDs)
 	categoriesMap, _ := r.fetchExternalCategories(ctx, externalIDs)
 	groupsMap, _ := r.fetchExternalGroups(ctx, externalIDs)
-	relatedsMap, _ := r.fetchExternalRelateds(ctx, externalIDs)
+	relatedsMap, relatedImageIDs, _ := r.fetchExternalRelateds(ctx, externalIDs)
+
+	// Fetch images for external related posts
+	imageMap, _ := r.fetchImages(ctx, relatedImageIDs)
+
 	for i := range result {
 		if pid := getMetaInt(result[i].Metadata, "partnerID"); pid > 0 {
 			result[i].Partner = partners[pid]
@@ -966,6 +970,13 @@ func (r *Repo) QueryExternals(ctx context.Context, where *ExternalWhereInput, or
 		result[i].Categories = categoriesMap[idInt]
 		result[i].Groups = groupsMap[idInt]
 		result[i].Relateds = relatedsMap[idInt]
+
+		// Set heroImage for related posts
+		for j := range result[i].Relateds {
+			if idImg := getMetaInt(result[i].Relateds[j].Metadata, "heroImageID"); idImg > 0 {
+				result[i].Relateds[j].HeroImage = imageMap[idImg]
+			}
+		}
 	}
 
 	// 寫入 cache
@@ -2238,15 +2249,16 @@ func (r *Repo) fetchExternalGroups(ctx context.Context, externalIDs []int) (map[
 	return result, rows.Err()
 }
 
-func (r *Repo) fetchExternalRelateds(ctx context.Context, externalIDs []int) (map[int][]Post, error) {
+func (r *Repo) fetchExternalRelateds(ctx context.Context, externalIDs []int) (map[int][]Post, []int, error) {
 	result := map[int][]Post{}
+	imageIDs := []int{}
 	if len(externalIDs) == 0 {
-		return result, nil
+		return result, imageIDs, nil
 	}
 	query := `SELECT er."A" as external_id, p.id, p.slug, p.title, p."heroImage" FROM "_External_relateds" er JOIN "Post" p ON p.id = er."B" WHERE er."A" = ANY($1) AND p.state = 'published'`
 	rows, err := r.db.QueryContext(ctx, query, pqIntArray(externalIDs))
 	if err != nil {
-		return result, err
+		return result, imageIDs, err
 	}
 	defer rows.Close()
 	for rows.Next() {
@@ -2255,10 +2267,11 @@ func (r *Repo) fetchExternalRelateds(ctx context.Context, externalIDs []int) (ma
 		var dbID int
 		var heroID sql.NullInt64
 		if err := rows.Scan(&eid, &dbID, &rp.Slug, &rp.Title, &heroID); err != nil {
-			return result, err
+			return result, imageIDs, err
 		}
 		rp.ID = strconv.Itoa(dbID)
 		if heroID.Valid {
+			imageIDs = append(imageIDs, int(heroID.Int64))
 			if rp.Metadata == nil {
 				rp.Metadata = map[string]any{}
 			}
@@ -2266,7 +2279,7 @@ func (r *Repo) fetchExternalRelateds(ctx context.Context, externalIDs []int) (ma
 		}
 		result[eid] = append(result[eid], rp)
 	}
-	return result, rows.Err()
+	return result, imageIDs, rows.Err()
 }
 
 func (r *Repo) fetchTopicSlideshowImages(ctx context.Context, topicIDs []int) (map[int][]Photo, []int, error) {
