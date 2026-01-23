@@ -730,8 +730,8 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 	} else {
 		return nil, nil
 	}
-	// 只回傳 state = 'published' 的文章
-	sb.WriteString(" AND state = 'published'")
+	// 只回傳 state = 'published' 或 'invisible' 的文章
+	sb.WriteString(" AND state IN ('published', 'invisible')")
 	sb.WriteString(" LIMIT 1")
 
 	var (
@@ -1028,7 +1028,7 @@ func (r *Repo) QueryTopics(ctx context.Context, where *TopicWhereInput, orders [
 
 	// 嘗試從 cache 讀取
 	if r.cache != nil && r.cache.Enabled() {
-		cacheKey := GenerateCacheKey("topics", map[string]interface{}{
+		cacheKey := GenerateCacheKey("topics:v2", map[string]interface{}{
 			"where":  where,
 			"orders": orders,
 			"take":   take,
@@ -1227,7 +1227,7 @@ func (r *Repo) QueryTopicsCount(ctx context.Context, where *TopicWhereInput) (in
 
 	// 嘗試從 cache 讀取
 	if r.cache != nil && r.cache.Enabled() {
-		cacheKey := GenerateCacheKey("topicsCount", where)
+		cacheKey := GenerateCacheKey("topicsCount:v2", where)
 		var cachedCount int
 		if found, _ := r.cache.Get(ctx, cacheKey, &cachedCount); found {
 			return cachedCount, nil
@@ -1277,7 +1277,7 @@ func (r *Repo) QueryTopicsCount(ctx context.Context, where *TopicWhereInput) (in
 
 	// 寫入 cache
 	if r.cache != nil && r.cache.Enabled() {
-		cacheKey := GenerateCacheKey("topicsCount", where)
+		cacheKey := GenerateCacheKey("topicsCount:v2", where)
 		_ = r.cache.Set(ctx, cacheKey, count)
 	}
 
@@ -1293,7 +1293,7 @@ func (r *Repo) QueryTopicByUnique(ctx context.Context, where *TopicWhereUniqueIn
 
 	// 嘗試從 cache 讀取
 	if r.cache != nil && r.cache.Enabled() {
-		cacheKey := GenerateCacheKey("topic:unique", where)
+		cacheKey := GenerateCacheKey("topic:unique:v2", where)
 		var cachedTopic *Topic
 		if found, _ := r.cache.Get(ctx, cacheKey, &cachedTopic); found {
 			return cachedTopic, nil
@@ -1451,7 +1451,7 @@ func ensurePostPublished(where *PostWhereInput) *PostWhereInput {
 		where = &PostWhereInput{}
 	}
 	if where.State == nil {
-		where.State = &StringFilter{Equals: ptrString("published")}
+		where.State = &StringFilter{In: []string{"published", "invisible"}}
 	}
 	return where
 }
@@ -1646,7 +1646,7 @@ func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 		for id := range uniqueRelatedIDs {
 			uniqueIDs = append(uniqueIDs, id)
 		}
-		rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1) AND state = 'published'`, pqIntArray(uniqueIDs))
+		rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1) AND state IN ('published', 'invisible')`, pqIntArray(uniqueIDs))
 		if err != nil {
 			return err
 		}
@@ -1949,12 +1949,12 @@ func (r *Repo) fetchRelatedPosts(ctx context.Context, postIDs []int) (map[int][]
 		SELECT r."A" as post_id, p.id, p.slug, p.title, p."heroImage"
 		FROM "_Post_relateds" r
 		JOIN "Post" p ON p.id = r."B"
-		WHERE r."A" = ANY($1) AND p.state = 'published'
+		WHERE r."A" = ANY($1) AND p.state IN ('published', 'invisible')
 		UNION
 		SELECT r."B" as post_id, p.id, p.slug, p.title, p."heroImage"
 		FROM "_Post_relateds" r
 		JOIN "Post" p ON p.id = r."A"
-		WHERE r."B" = ANY($1) AND p.state = 'published'
+		WHERE r."B" = ANY($1) AND p.state IN ('published', 'invisible')
 	`
 	rows, err := r.db.QueryContext(ctx, query, pqIntArray(postIDs))
 	if err != nil {
@@ -1985,7 +1985,7 @@ func (r *Repo) fetchPostsByIDs(ctx context.Context, ids []int) ([]Post, []int, e
 	if len(ids) == 0 {
 		return result, imageIDs, nil
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1) AND state = 'published'`, pqIntArray(ids))
+	rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1) AND state IN ('published', 'invisible')`, pqIntArray(ids))
 	if err != nil {
 		return result, imageIDs, err
 	}
@@ -2031,7 +2031,7 @@ func (r *Repo) fetchRelatedsByManualOrder(ctx context.Context, manualOrder []map
 	}
 
 	// Query posts by ids
-	rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1) AND state = 'published'`, pqIntArray(ids))
+rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1) AND state IN ('published', 'invisible')`, pqIntArray(ids))
 	if err != nil {
 		return result, imageIDs, err
 	}
@@ -2295,7 +2295,7 @@ func (r *Repo) fetchExternalRelateds(ctx context.Context, externalIDs []int) (ma
 	if len(externalIDs) == 0 {
 		return result, nil
 	}
-	query := `SELECT er."A" as external_id, p.id, p.slug, p.title, p."heroImage" FROM "_External_relateds" er JOIN "Post" p ON p.id = er."B" WHERE er."A" = ANY($1) AND p.state = 'published'`
+query := `SELECT er."A" as external_id, p.id, p.slug, p.title, p."heroImage" FROM "_External_relateds" er JOIN "Post" p ON p.id = er."B" WHERE er."A" = ANY($1) AND p.state IN ('published', 'invisible')`
 	rows, err := r.db.QueryContext(ctx, query, pqIntArray(externalIDs))
 	if err != nil {
 		return result, err
