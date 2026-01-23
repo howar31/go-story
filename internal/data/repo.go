@@ -3,8 +3,10 @@ package data
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -1779,7 +1781,7 @@ func (r *Repo) EnrichPosts(ctx context.Context, posts []Post, fields map[string]
 			}
 
 			// Assign images to relateds if they were fetched
-			if fields["relateds"] || fields["relatedsInInputOrder"] {
+			if fields["relateds"] || fields["relatedsInInputOrder"] || fields["relatedsOne"] || fields["relatedsTwo"] {
 				if p.RelatedsOne != nil {
 					if idImg := getMetaInt(p.RelatedsOne.Metadata, "heroImageID"); idImg > 0 {
 						p.RelatedsOne.HeroImage = imageMap[idImg]
@@ -1793,6 +1795,8 @@ func (r *Repo) EnrichPosts(ctx context.Context, posts []Post, fields map[string]
 				for j := range p.Relateds {
 					if idImg := getMetaInt(p.Relateds[j].Metadata, "heroImageID"); idImg > 0 {
 						p.Relateds[j].HeroImage = imageMap[idImg]
+					} else {
+						// log.Printf("Post %s Related %s has no heroImageID", p.ID, p.Relateds[j].ID)
 					}
 				}
 				for j := range p.RelatedsInInputOrder {
@@ -1803,12 +1807,14 @@ func (r *Repo) EnrichPosts(ctx context.Context, posts []Post, fields map[string]
 			}
 
 			// Assign image to video if fetched
-			if fields["heroVideo"] && p.HeroVideo != nil {
+			if fields["heroVideo"] && p.HeroVideo != nil && p.HeroVideo.HeroImage != nil {
 				if idImg := getMetaInt(p.HeroVideo.HeroImage.Metadata, "heroImageID"); idImg > 0 {
 					p.HeroVideo.HeroImage = imageMap[idImg]
 				}
 			}
 		}
+	} else {
+		log.Println("No imageIDs to fetch")
 	}
 
 	return nil
@@ -2408,12 +2414,21 @@ func (r *Repo) FetchTopicSlideshowImages(ctx context.Context, topicIDs []int) (m
 	return result, imageIDs, rows.Err()
 }
 
-func pqIntArray(ids []int) interface{} {
-	arr := make([]int64, len(ids))
-	for i, id := range ids {
-		arr[i] = int64(id)
+type IntArray []int
+
+func (a IntArray) Value() (driver.Value, error) {
+	if len(a) == 0 {
+		return "{}", nil
 	}
-	return arr
+	parts := make([]string, len(a))
+	for i, v := range a {
+		parts[i] = strconv.Itoa(v)
+	}
+	return "{" + strings.Join(parts, ",") + "}", nil
+}
+
+func pqIntArray(ids []int) interface{} {
+	return IntArray(ids)
 }
 
 func (r *Repo) buildResizedURLs(fileID, ext string) Resized {
