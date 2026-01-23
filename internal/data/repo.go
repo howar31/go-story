@@ -955,6 +955,22 @@ func (r *Repo) QueryExternals(ctx context.Context, where *ExternalWhereInput, or
 	categoriesMap, _ := r.fetchExternalCategories(ctx, externalIDs)
 	groupsMap, _ := r.fetchExternalGroups(ctx, externalIDs)
 	relatedsMap, _ := r.fetchExternalRelateds(ctx, externalIDs)
+	relatedImageIDs := []int{}
+	for _, relateds := range relatedsMap {
+		for _, rp := range relateds {
+			if idImg := getMetaInt(rp.Metadata, "heroImageID"); idImg > 0 {
+				relatedImageIDs = append(relatedImageIDs, idImg)
+			}
+		}
+	}
+	relatedImageMap := map[int]*Photo{}
+	if len(relatedImageIDs) > 0 {
+		var err error
+		relatedImageMap, err = r.fetchImages(ctx, relatedImageIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
 	for i := range result {
 		if pid := getMetaInt(result[i].Metadata, "partnerID"); pid > 0 {
 			result[i].Partner = partners[pid]
@@ -965,7 +981,13 @@ func (r *Repo) QueryExternals(ctx context.Context, where *ExternalWhereInput, or
 		result[i].Sections = sectionsMap[idInt]
 		result[i].Categories = categoriesMap[idInt]
 		result[i].Groups = groupsMap[idInt]
-		result[i].Relateds = relatedsMap[idInt]
+		relateds := relatedsMap[idInt]
+		for j := range relateds {
+			if idImg := getMetaInt(relateds[j].Metadata, "heroImageID"); idImg > 0 {
+				relateds[j].HeroImage = relatedImageMap[idImg]
+			}
+		}
+		result[i].Relateds = relateds
 	}
 
 	// 寫入 cache
