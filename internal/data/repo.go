@@ -2200,8 +2200,8 @@ func (r *Repo) FetchImages(ctx context.Context, ids []int) (map[int]*Photo, erro
 				Height: int(im.height.Int64),
 			},
 		}
-		photo.Resized = r.buildResizedURLs(im.fileID, im.ext)
-		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp")
+		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64))
+		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp", int(im.width.Int64))
 		result[im.id] = &photo
 	}
 	return result, rows.Err()
@@ -2407,8 +2407,8 @@ func (r *Repo) FetchTopicSlideshowImages(ctx context.Context, topicIDs []int) (m
 				Height: int(im.height.Int64),
 			},
 		}
-		photo.Resized = r.buildResizedURLs(im.fileID, im.ext)
-		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp")
+		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64))
+		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp", int(im.width.Int64))
 		result[tid] = append(result[tid], photo)
 	}
 	return result, imageIDs, rows.Err()
@@ -2431,7 +2431,7 @@ func pqIntArray(ids []int) interface{} {
 	return IntArray(ids)
 }
 
-func (r *Repo) buildResizedURLs(fileID, ext string) Resized {
+func (r *Repo) buildResizedURLs(fileID, ext string, width int) Resized {
 	if fileID == "" {
 		return Resized{}
 	}
@@ -2439,18 +2439,22 @@ func (r *Repo) buildResizedURLs(fileID, ext string) Resized {
 		ext = "jpg"
 	}
 	host := r.staticsHost
-	makeURL := func(size string, extension string) string {
+	makeURL := func(size string, targetWidth int, extension string) string {
+		// Skip generating URL if target width exceeds original width
+		if targetWidth > 0 && width > 0 && targetWidth > width {
+			return ""
+		}
 		if size == "" {
 			return fmt.Sprintf("%s/%s.%s", host, fileID, extension)
 		}
 		return fmt.Sprintf("%s/%s-%s.%s", host, fileID, size, extension)
 	}
 	return Resized{
-		Original: makeURL("", ext),
-		W480:     makeURL("w480", ext),
-		W800:     makeURL("w800", ext),
-		W1200:    makeURL("w1200", ext),
-		W1600:    makeURL("w1600", ext),
-		W2400:    makeURL("w2400", ext),
+		Original: makeURL("", 0, ext),
+		W480:     makeURL("w480", 480, ext),
+		W800:     makeURL("w800", 800, ext),
+		W1200:    makeURL("w1200", 1200, ext),
+		W1600:    makeURL("w1600", 1600, ext),
+		W2400:    makeURL("w2400", 2400, ext),
 	}
 }
