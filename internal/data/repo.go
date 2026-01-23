@@ -1607,41 +1607,93 @@ func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 	// Fetch relatedsInInputOrder based on manualOrderOfRelateds for each post
 	relatedsInInputOrderMap := make(map[int][]Post)
 	relatedsInInputOrderImageIDs := []int{}
+	manualOrders := map[int][]int{}
+	uniqueRelatedIDs := map[int]struct{}{}
 	for _, p := range posts {
-		id, _ := strconv.Atoi(p.ID)
-		relatedsInOrder, imgIDs, err := r.fetchRelatedsByManualOrder(ctx, p.ManualOrderOfRelateds)
-		if err != nil {
-			// Log error but continue
+		postID, _ := strconv.Atoi(p.ID)
+		if len(p.ManualOrderOfRelateds) == 0 {
 			continue
 		}
-		relatedsInInputOrderMap[id] = relatedsInOrder
-		relatedsInInputOrderImageIDs = append(relatedsInInputOrderImageIDs, imgIDs...)
+		ids := []int{}
+		for _, item := range p.ManualOrderOfRelateds {
+			if idStr, ok := item["id"].(string); ok {
+				if id, err := strconv.Atoi(idStr); err == nil {
+					ids = append(ids, id)
+					uniqueRelatedIDs[id] = struct{}{}
+				}
+			}
+		}
+		if len(ids) > 0 {
+			manualOrders[postID] = ids
+		}
 	}
-	imageIDs = append(imageIDs, relatedsInInputOrderImageIDs...)
-
 	relatedOneIDs := []int{}
 	relatedTwoIDs := []int{}
 	for _, p := range posts {
 		if id := getMetaInt(p.Metadata, "relatedsOneID"); id > 0 {
 			relatedOneIDs = append(relatedOneIDs, id)
+			uniqueRelatedIDs[id] = struct{}{}
 		}
 		if id := getMetaInt(p.Metadata, "relatedsTwoID"); id > 0 {
 			relatedTwoIDs = append(relatedTwoIDs, id)
+			uniqueRelatedIDs[id] = struct{}{}
 		}
 	}
-	relatedSinglesIDs := append(relatedOneIDs, relatedTwoIDs...)
 	relatedSinglePosts := map[int]Post{}
-	if len(relatedSinglesIDs) > 0 {
-		sps, imgIDs, err := r.fetchPostsByIDs(ctx, relatedSinglesIDs)
+
+	if len(uniqueRelatedIDs) > 0 {
+		uniqueIDs := make([]int, 0, len(uniqueRelatedIDs))
+		for id := range uniqueRelatedIDs {
+			uniqueIDs = append(uniqueIDs, id)
+		}
+		rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1) AND state = 'published'`, pqIntArray(uniqueIDs))
 		if err != nil {
 			return err
 		}
-		for _, sp := range sps {
-			id, _ := strconv.Atoi(sp.ID)
-			relatedSinglePosts[id] = sp
+		postsMap := make(map[int]Post)
+		for rows.Next() {
+			var p Post
+			var dbID int
+			var hero sql.NullInt64
+			if err := rows.Scan(&dbID, &p.Slug, &p.Title, &hero); err != nil {
+				rows.Close()
+				return err
+			}
+			p.ID = strconv.Itoa(dbID)
+			if hero.Valid {
+				relatedsInInputOrderImageIDs = append(relatedsInInputOrderImageIDs, int(hero.Int64))
+				p.Metadata = map[string]any{"heroImageID": int(hero.Int64)}
+			}
+			postsMap[dbID] = p
 		}
-		imageIDs = append(imageIDs, imgIDs...)
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		_ = rows.Close()
+
+		for postID, order := range manualOrders {
+			ordered := []Post{}
+			for _, id := range order {
+				if p, ok := postsMap[id]; ok {
+					ordered = append(ordered, p)
+				}
+			}
+			relatedsInInputOrderMap[postID] = ordered
+		}
+
+		for _, id := range relatedOneIDs {
+			if p, ok := postsMap[id]; ok {
+				relatedSinglePosts[id] = p
+			}
+		}
+		for _, id := range relatedTwoIDs {
+			if p, ok := postsMap[id]; ok {
+				relatedSinglePosts[id] = p
+			}
+		}
 	}
+	imageIDs = append(imageIDs, relatedsInInputOrderImageIDs...)
 
 	videoIDs := []int{}
 	topicIDs := []int{}
