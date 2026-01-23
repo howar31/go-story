@@ -2200,8 +2200,8 @@ func (r *Repo) FetchImages(ctx context.Context, ids []int) (map[int]*Photo, erro
 				Height: int(im.height.Int64),
 			},
 		}
-		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64))
-		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp", int(im.width.Int64))
+		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64), int(im.height.Int64))
+		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp", int(im.width.Int64), int(im.height.Int64))
 		result[im.id] = &photo
 	}
 	return result, rows.Err()
@@ -2407,8 +2407,8 @@ func (r *Repo) FetchTopicSlideshowImages(ctx context.Context, topicIDs []int) (m
 				Height: int(im.height.Int64),
 			},
 		}
-		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64))
-		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp", int(im.width.Int64))
+		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64), int(im.height.Int64))
+		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp", int(im.width.Int64), int(im.height.Int64))
 		result[tid] = append(result[tid], photo)
 	}
 	return result, imageIDs, rows.Err()
@@ -2431,7 +2431,7 @@ func pqIntArray(ids []int) interface{} {
 	return IntArray(ids)
 }
 
-func (r *Repo) buildResizedURLs(fileID, ext string, width int) Resized {
+func (r *Repo) buildResizedURLs(fileID, ext string, width, height int) Resized {
 	if fileID == "" {
 		return Resized{}
 	}
@@ -2439,22 +2439,36 @@ func (r *Repo) buildResizedURLs(fileID, ext string, width int) Resized {
 		ext = "jpg"
 	}
 	host := r.staticsHost
-	makeURL := func(size string, targetWidth int, extension string) string {
-		// Skip generating URL if target width exceeds original width
-		if targetWidth > 0 && width > 0 && targetWidth > width {
-			return ""
-		}
+	makeURL := func(size string, extension string) string {
 		if size == "" {
 			return fmt.Sprintf("%s/%s.%s", host, fileID, extension)
 		}
 		return fmt.Sprintf("%s/%s-%s.%s", host, fileID, size, extension)
 	}
+
+	// Match Node.js logic:
+	// - Landscape (width >= height): generate w480, w800, w1600, w2400 (skip w1200)
+	// - Portrait (width < height): generate w480, w800, w1200, w1600 (skip w2400)
+	isLandscape := width >= height
+
 	return Resized{
-		Original: makeURL("", 0, ext),
-		W480:     makeURL("w480", 480, ext),
-		W800:     makeURL("w800", 800, ext),
-		W1200:    makeURL("w1200", 1200, ext),
-		W1600:    makeURL("w1600", 1600, ext),
-		W2400:    makeURL("w2400", 2400, ext),
+		Original: makeURL("", ext),
+		W480:     makeURL("w480", ext),
+		W800:     makeURL("w800", ext),
+		W1200: func() string {
+			if isLandscape {
+				return ""
+			} else {
+				return makeURL("w1200", ext)
+			}
+		}(),
+		W1600: makeURL("w1600", ext),
+		W2400: func() string {
+			if isLandscape {
+				return makeURL("w2400", ext)
+			} else {
+				return ""
+			}
+		}(),
 	}
 }
