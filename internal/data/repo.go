@@ -2201,7 +2201,7 @@ func (r *Repo) FetchImages(ctx context.Context, ids []int) (map[int]*Photo, erro
 			},
 		}
 		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64), int(im.height.Int64))
-		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp", int(im.width.Int64), int(im.height.Int64))
+		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webP", int(im.width.Int64), int(im.height.Int64))
 		result[im.id] = &photo
 	}
 	return result, rows.Err()
@@ -2408,7 +2408,7 @@ func (r *Repo) FetchTopicSlideshowImages(ctx context.Context, topicIDs []int) (m
 			},
 		}
 		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64), int(im.height.Int64))
-		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp", int(im.width.Int64), int(im.height.Int64))
+		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webP", int(im.width.Int64), int(im.height.Int64))
 		result[tid] = append(result[tid], photo)
 	}
 	return result, imageIDs, rows.Err()
