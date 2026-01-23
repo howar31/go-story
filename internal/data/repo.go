@@ -2150,8 +2150,8 @@ func (r *Repo) fetchImages(ctx context.Context, ids []int) (map[int]*Photo, erro
 				Height: int(im.height.Int64),
 			},
 		}
-		photo.Resized = r.buildResizedURLs(im.fileID, im.ext)
-		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp")
+		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64), int(im.height.Int64))
+		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webP", int(im.width.Int64), int(im.height.Int64))
 		result[im.id] = &photo
 	}
 	return result, rows.Err()
@@ -2357,8 +2357,8 @@ func (r *Repo) fetchTopicSlideshowImages(ctx context.Context, topicIDs []int) (m
 				Height: int(im.height.Int64),
 			},
 		}
-		photo.Resized = r.buildResizedURLs(im.fileID, im.ext)
-		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp")
+		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64), int(im.height.Int64))
+		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webP", int(im.width.Int64), int(im.height.Int64))
 		result[tid] = append(result[tid], photo)
 	}
 	return result, imageIDs, rows.Err()
@@ -2372,7 +2372,7 @@ func pqIntArray(ids []int) interface{} {
 	return arr
 }
 
-func (r *Repo) buildResizedURLs(fileID, ext string) Resized {
+func (r *Repo) buildResizedURLs(fileID, ext string, width, height int) Resized {
 	if fileID == "" {
 		return Resized{}
 	}
@@ -2386,12 +2386,23 @@ func (r *Repo) buildResizedURLs(fileID, ext string) Resized {
 		}
 		return fmt.Sprintf("%s/%s-%s.%s", host, fileID, size, extension)
 	}
+	isLandscape := width >= height
 	return Resized{
 		Original: makeURL("", ext),
 		W480:     makeURL("w480", ext),
 		W800:     makeURL("w800", ext),
-		W1200:    makeURL("w1200", ext),
-		W1600:    makeURL("w1600", ext),
-		W2400:    makeURL("w2400", ext),
+		W1200: func() string {
+			if isLandscape {
+				return ""
+			}
+			return makeURL("w1200", ext)
+		}(),
+		W1600: makeURL("w1600", ext),
+		W2400: func() string {
+			if isLandscape {
+				return makeURL("w2400", ext)
+			}
+			return ""
+		}(),
 	}
 }
