@@ -3,10 +3,8 @@ package data
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -600,32 +598,19 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 	if len(posts) == 0 {
 		return posts, nil
 	}
-	// Eager loading removed in favor of Dataloader
-	// if err := r.enrichPosts(ctx, posts); err != nil {
-	// 	return nil, err
-	// }
-
-	fields := map[string]bool{
-		"sections":      true,
-		"categories":    true,
-		"tags":          true,
-		"tags_algo":     true,
-		"heroImage":     true,
-		"heroVideo":     true,
-		"og_image":      true,
-		"topics":        true,
-		"relateds":      true,
-		"relatedsOne":   true,
-		"relatedsTwo":   true,
-		"writers":       true,
-		"photographers": true,
-		"camera_man":    true,
-		"designers":     true,
-		"engineers":     true,
-		"vocals":        true,
-	}
-	if err := r.EnrichPosts(ctx, posts, fields); err != nil {
+	if err := r.enrichPosts(ctx, posts); err != nil {
 		return nil, err
+	}
+
+	// 寫入 cache
+	if r.cache != nil && r.cache.Enabled() {
+		cacheKey := GenerateCacheKey("posts", map[string]interface{}{
+			"where":  where,
+			"orders": orders,
+			"take":   take,
+			"skip":   skip,
+		})
+		_ = r.cache.Set(ctx, cacheKey, posts)
 	}
 
 	return posts, nil
@@ -820,9 +805,9 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 		"relatedsTwoID": nullableInt(relatedsTwoID),
 	}
 	posts := []Post{p}
-	// if err := r.enrichPosts(ctx, posts); err != nil {
-	// 	return nil, err
-	// }
+	if err := r.enrichPosts(ctx, posts); err != nil {
+		return nil, err
+	}
 	p = posts[0]
 
 	// 寫入 cache
@@ -963,18 +948,25 @@ func (r *Repo) QueryExternals(ctx context.Context, where *ExternalWhereInput, or
 		return nil, err
 	}
 
-	// for i := range result {
-	// 	if pid := getMetaInt(result[i].Metadata, "partnerID"); pid > 0 {
-	// 		result[i].Partner = partners[pid]
-	// 	}
-	// 	idInt, _ := strconv.Atoi(result[i].ID)
-	// 	result[i].Tags = tagsMap[idInt]
-	// 	result[i].TagsAlgo = tagsAlgoMap[idInt]
-	// 	result[i].Sections = sectionsMap[idInt]
-	// 	result[i].Categories = categoriesMap[idInt]
-	// 	result[i].Groups = groupsMap[idInt]
-	// 	result[i].Relateds = relatedsMap[idInt]
-	// }
+	partners, _ := r.fetchPartners(ctx, partnerIDs)
+	tagsMap, _ := r.fetchExternalTags(ctx, "_External_tags", externalIDs)
+	tagsAlgoMap, _ := r.fetchExternalTags(ctx, "_External_tags_algo", externalIDs)
+	sectionsMap, _ := r.fetchExternalSections(ctx, externalIDs)
+	categoriesMap, _ := r.fetchExternalCategories(ctx, externalIDs)
+	groupsMap, _ := r.fetchExternalGroups(ctx, externalIDs)
+	relatedsMap, _ := r.fetchExternalRelateds(ctx, externalIDs)
+	for i := range result {
+		if pid := getMetaInt(result[i].Metadata, "partnerID"); pid > 0 {
+			result[i].Partner = partners[pid]
+		}
+		idInt, _ := strconv.Atoi(result[i].ID)
+		result[i].Tags = tagsMap[idInt]
+		result[i].TagsAlgo = tagsAlgoMap[idInt]
+		result[i].Sections = sectionsMap[idInt]
+		result[i].Categories = categoriesMap[idInt]
+		result[i].Groups = groupsMap[idInt]
+		result[i].Relateds = relatedsMap[idInt]
+	}
 
 	// 寫入 cache
 	if r.cache != nil && r.cache.Enabled() {
@@ -1211,9 +1203,9 @@ func (r *Repo) QueryTopics(ctx context.Context, where *TopicWhereInput, orders [
 	if len(topics) == 0 {
 		return topics, nil
 	}
-	// if err := r.enrichTopics(ctx, topics); err != nil {
-	// 	return nil, err
-	// }
+	if err := r.enrichTopics(ctx, topics); err != nil {
+		return nil, err
+	}
 
 	// 寫入 cache
 	if r.cache != nil && r.cache.Enabled() {
@@ -1427,9 +1419,9 @@ func (r *Repo) QueryTopicByUnique(ctx context.Context, where *TopicWhereUniqueIn
 	}
 
 	topics := []Topic{t}
-	// if err := r.enrichTopics(ctx, topics); err != nil {
-	// 	return nil, err
-	// }
+	if err := r.enrichTopics(ctx, topics); err != nil {
+		return nil, err
+	}
 	t = topics[0]
 
 	// 寫入 cache
@@ -1573,254 +1565,177 @@ func buildTopicOrderClause(rule OrderRule) string {
 	}
 }
 
-func (r *Repo) EnrichPosts(ctx context.Context, posts []Post, fields map[string]bool) error {
+func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 	if len(posts) == 0 {
 		return nil
 	}
 	postIDs := make([]int, 0, len(posts))
 	for _, p := range posts {
 		id, _ := strconv.Atoi(p.ID)
-		if id != 0 {
-			postIDs = append(postIDs, id)
+		if id == 0 {
+			continue
 		}
+		postIDs = append(postIDs, id)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	if fields["sections"] || fields["sectionsInInputOrder"] {
-		sectionsMap, err := r.FetchSections(ctx, postIDs)
-		if err != nil {
-			return err
-		}
-		for i := range posts {
-			id, _ := strconv.Atoi(posts[i].ID)
-			posts[i].Sections = sectionsMap[id]
-			posts[i].SectionsInInputOrder = sectionsMap[id]
-		}
+	sectionsMap, err := r.fetchSections(ctx, postIDs)
+	if err != nil {
+		return err
 	}
-
-	if fields["categories"] || fields["categoriesInInputOrder"] {
-		categoriesMap, err := r.FetchCategories(ctx, postIDs)
-		if err != nil {
-			return err
-		}
-		for i := range posts {
-			id, _ := strconv.Atoi(posts[i].ID)
-			posts[i].Categories = categoriesMap[id]
-			posts[i].CategoriesInInputOrder = categoriesMap[id]
-		}
+	categoriesMap, err := r.fetchCategories(ctx, postIDs)
+	if err != nil {
+		return err
 	}
+	roleMapWriters, _ := r.fetchContacts(ctx, "_Post_writers", postIDs)
+	roleMapPhotographers, _ := r.fetchContacts(ctx, "_Post_photographers", postIDs)
+	roleMapCamera, _ := r.fetchContacts(ctx, "_Post_camera_man", postIDs)
+	roleMapDesigners, _ := r.fetchContacts(ctx, "_Post_designers", postIDs)
+	roleMapEngineers, _ := r.fetchContacts(ctx, "_Post_engineers", postIDs)
+	roleMapVocals, _ := r.fetchContacts(ctx, "_Post_vocals", postIDs)
 
-	enrichContacts := func(field string, table string, assign func(*Post, []Contact)) {
-		if fields[field] || fields[field+"InInputOrder"] {
-			res, _ := r.FetchContacts(ctx, table, postIDs)
-			for i := range posts {
-				id, _ := strconv.Atoi(posts[i].ID)
-				assign(&posts[i], res[id])
-			}
-		}
+	tagsMap, _ := r.fetchTags(ctx, "_Post_tags", postIDs)
+	tagsAlgoMap, _ := r.fetchTags(ctx, "_Post_tags_algo", postIDs)
+
+	relatedsMap, relatedImageIDs, err := r.fetchRelatedPosts(ctx, postIDs)
+	if err != nil {
+		return err
 	}
-	enrichContacts("writers", "_Post_writers", func(p *Post, c []Contact) { p.Writers = c; p.WritersInInputOrder = c })
-	enrichContacts("photographers", "_Post_photographers", func(p *Post, c []Contact) { p.Photographers = c })
-	enrichContacts("camera_man", "_Post_camera_man", func(p *Post, c []Contact) { p.CameraMan = c })
-	enrichContacts("designers", "_Post_designers", func(p *Post, c []Contact) { p.Designers = c })
-	enrichContacts("engineers", "_Post_engineers", func(p *Post, c []Contact) { p.Engineers = c })
-	enrichContacts("vocals", "_Post_vocals", func(p *Post, c []Contact) { p.Vocals = c })
+	imageIDs := append([]int{}, relatedImageIDs...)
 
-	if fields["tags"] || fields["tags_algo"] {
-		tagsMap, _ := r.FetchTags(ctx, "_Post_tags", postIDs)
-		tagsAlgoMap, _ := r.FetchTags(ctx, "_Post_tags_algo", postIDs)
-		for i := range posts {
-			id, _ := strconv.Atoi(posts[i].ID)
-			posts[i].Tags = tagsMap[id]
-			posts[i].TagsAlgo = tagsAlgoMap[id]
-		}
-	}
-
-	// We accumulate imageIDs if we need to fetch them
-	imageIDs := []int{}
-
-	// If relateds are requested, we need to fetch them AND potentially their hero images
-	// Original logic fetched images for ALL related posts if fetchRelatedPosts was called.
-	// We will preserve this but only if relateds are requested.
-	if fields["relateds"] || fields["relatedsInInputOrder"] || fields["relatedsOne"] || fields["relatedsTwo"] {
-		relatedsMap, relatedImageIDs, err := r.FetchRelatedPosts(ctx, postIDs)
-		if err != nil {
-			return err
-		}
-		imageIDs = append(imageIDs, relatedImageIDs...)
-
-		relatedsInInputOrderMap := make(map[int][]Post)
-		relatedsInInputOrderImageIDs := []int{}
-		for _, p := range posts {
-			id, _ := strconv.Atoi(p.ID)
-			relatedsInOrder, imgIDs, err := r.fetchRelatedsByManualOrder(ctx, p.ManualOrderOfRelateds)
-			if err != nil {
-				continue
-			}
-			relatedsInInputOrderMap[id] = relatedsInOrder
-			relatedsInInputOrderImageIDs = append(relatedsInInputOrderImageIDs, imgIDs...)
-		}
-		imageIDs = append(imageIDs, relatedsInInputOrderImageIDs...)
-
-		relatedOneIDs := []int{}
-		relatedTwoIDs := []int{}
-		for _, p := range posts {
-			if id := getMetaInt(p.Metadata, "relatedsOneID"); id > 0 {
-				relatedOneIDs = append(relatedOneIDs, id)
-			}
-			if id := getMetaInt(p.Metadata, "relatedsTwoID"); id > 0 {
-				relatedTwoIDs = append(relatedTwoIDs, id)
-			}
-		}
-		relatedSinglesIDs := append(relatedOneIDs, relatedTwoIDs...)
-		relatedSinglePosts := map[int]Post{}
-		if len(relatedSinglesIDs) > 0 {
-			sps, imgIDs, err := r.FetchPostsByIDs(ctx, relatedSinglesIDs)
-			if err != nil {
-				return err
-			}
-			for _, sp := range sps {
-				id, _ := strconv.Atoi(sp.ID)
-				relatedSinglePosts[id] = sp
-			}
-			imageIDs = append(imageIDs, imgIDs...)
-		}
-
-		for i := range posts {
-			p := &posts[i]
-			id, _ := strconv.Atoi(p.ID)
-			p.Relateds = relatedsMap[id]
-			p.RelatedsInInputOrder = relatedsInInputOrderMap[id]
-			if p.RelatedsInInputOrder == nil {
-				p.RelatedsInInputOrder = []Post{}
-			}
-			if r1 := getMetaInt(p.Metadata, "relatedsOneID"); r1 > 0 {
-				if rp, ok := relatedSinglePosts[r1]; ok {
-					p.RelatedsOne = &rp
-				}
-			}
-			if r2 := getMetaInt(p.Metadata, "relatedsTwoID"); r2 > 0 {
-				if rp, ok := relatedSinglePosts[r2]; ok {
-					p.RelatedsTwo = &rp
-				}
-			}
-		}
-	}
-
-	// Hero Video
-	if fields["heroVideo"] {
-		videoIDs := []int{}
-		for _, p := range posts {
-			if id := getMetaInt(p.Metadata, "heroVideoID"); id > 0 {
-				videoIDs = append(videoIDs, id)
-			}
-		}
-		videoMap, videoImageIDs, _ := r.FetchVideos(ctx, videoIDs)
-		imageIDs = append(imageIDs, videoImageIDs...)
-		for i := range posts {
-			// Need to verify if videoMap uses DB ID or Post ID?
-			// FetchVideos returns map[videoID]*Video.
-			// So we need to look up by heroVideoID.
-			if vid := getMetaInt(posts[i].Metadata, "heroVideoID"); vid > 0 {
-				posts[i].HeroVideo = videoMap[vid]
-			}
-		}
-	}
-
-	// Topics
-	if fields["topics"] {
-		topicIDs := []int{}
-		for _, p := range posts {
-			if id := getMetaInt(p.Metadata, "topicsID"); id > 0 {
-				topicIDs = append(topicIDs, id)
-			}
-		}
-		topicMap, _ := r.FetchTopics(ctx, topicIDs)
-		for i := range posts {
-			if tid := getMetaInt(posts[i].Metadata, "topicsID"); tid > 0 {
-				if t, ok := topicMap[tid]; ok {
-					posts[i].Topics = &t
-				}
-			}
-		}
-	}
-
-	// Images (Hero, OG, and related/video images accumulated)
-	// We always check if we need heroImage/ogImage for the main posts
+	// Fetch relatedsInInputOrder based on manualOrderOfRelateds for each post
+	relatedsInInputOrderMap := make(map[int][]Post)
+	relatedsInInputOrderImageIDs := []int{}
 	for _, p := range posts {
-		if fields["heroImage"] {
-			if id := getMetaInt(p.Metadata, "heroImageID"); id > 0 {
-				imageIDs = append(imageIDs, id)
-			}
+		id, _ := strconv.Atoi(p.ID)
+		relatedsInOrder, imgIDs, err := r.fetchRelatedsByManualOrder(ctx, p.ManualOrderOfRelateds)
+		if err != nil {
+			// Log error but continue
+			continue
 		}
-		if fields["og_image"] {
-			if id := getMetaInt(p.Metadata, "ogImageID"); id > 0 {
-				imageIDs = append(imageIDs, id)
-			}
+		relatedsInInputOrderMap[id] = relatedsInOrder
+		relatedsInInputOrderImageIDs = append(relatedsInInputOrderImageIDs, imgIDs...)
+	}
+	imageIDs = append(imageIDs, relatedsInInputOrderImageIDs...)
+
+	relatedOneIDs := []int{}
+	relatedTwoIDs := []int{}
+	for _, p := range posts {
+		if id := getMetaInt(p.Metadata, "relatedsOneID"); id > 0 {
+			relatedOneIDs = append(relatedOneIDs, id)
+		}
+		if id := getMetaInt(p.Metadata, "relatedsTwoID"); id > 0 {
+			relatedTwoIDs = append(relatedTwoIDs, id)
 		}
 	}
-
-	if len(imageIDs) > 0 {
-		imageMap, err := r.FetchImages(ctx, imageIDs)
+	relatedSinglesIDs := append(relatedOneIDs, relatedTwoIDs...)
+	relatedSinglePosts := map[int]Post{}
+	if len(relatedSinglesIDs) > 0 {
+		sps, imgIDs, err := r.fetchPostsByIDs(ctx, relatedSinglesIDs)
 		if err != nil {
 			return err
 		}
-		// Assign images
-		for i := range posts {
-			p := &posts[i]
-			if fields["heroImage"] {
-				if idImg := getMetaInt(p.Metadata, "heroImageID"); idImg > 0 {
-					p.HeroImage = imageMap[idImg]
-				}
-			}
-			if fields["og_image"] {
-				if idImg := getMetaInt(p.Metadata, "ogImageID"); idImg > 0 {
-					p.OgImage = imageMap[idImg]
-				}
-			}
-
-			// Assign images to relateds if they were fetched
-			if fields["relateds"] || fields["relatedsInInputOrder"] || fields["relatedsOne"] || fields["relatedsTwo"] {
-				if p.RelatedsOne != nil {
-					if idImg := getMetaInt(p.RelatedsOne.Metadata, "heroImageID"); idImg > 0 {
-						p.RelatedsOne.HeroImage = imageMap[idImg]
-					}
-				}
-				if p.RelatedsTwo != nil {
-					if idImg := getMetaInt(p.RelatedsTwo.Metadata, "heroImageID"); idImg > 0 {
-						p.RelatedsTwo.HeroImage = imageMap[idImg]
-					}
-				}
-				for j := range p.Relateds {
-					if idImg := getMetaInt(p.Relateds[j].Metadata, "heroImageID"); idImg > 0 {
-						p.Relateds[j].HeroImage = imageMap[idImg]
-					} else {
-						// log.Printf("Post %s Related %s has no heroImageID", p.ID, p.Relateds[j].ID)
-					}
-				}
-				for j := range p.RelatedsInInputOrder {
-					if idImg := getMetaInt(p.RelatedsInInputOrder[j].Metadata, "heroImageID"); idImg > 0 {
-						p.RelatedsInInputOrder[j].HeroImage = imageMap[idImg]
-					}
-				}
-			}
-
-			// Assign image to video if fetched
-			if fields["heroVideo"] && p.HeroVideo != nil && p.HeroVideo.HeroImage != nil {
-				if idImg := getMetaInt(p.HeroVideo.HeroImage.Metadata, "heroImageID"); idImg > 0 {
-					p.HeroVideo.HeroImage = imageMap[idImg]
-				}
-			}
+		for _, sp := range sps {
+			id, _ := strconv.Atoi(sp.ID)
+			relatedSinglePosts[id] = sp
 		}
-	} else {
-		log.Println("No imageIDs to fetch")
+		imageIDs = append(imageIDs, imgIDs...)
 	}
 
+	videoIDs := []int{}
+	topicIDs := []int{}
+	for _, p := range posts {
+		if id := getMetaInt(p.Metadata, "heroVideoID"); id > 0 {
+			videoIDs = append(videoIDs, id)
+		}
+		if id := getMetaInt(p.Metadata, "topicsID"); id > 0 {
+			topicIDs = append(topicIDs, id)
+		}
+		if id := getMetaInt(p.Metadata, "heroImageID"); id > 0 {
+			imageIDs = append(imageIDs, id)
+		}
+		if id := getMetaInt(p.Metadata, "ogImageID"); id > 0 {
+			imageIDs = append(imageIDs, id)
+		}
+	}
+
+	videoMap, videoImageIDs, _ := r.fetchVideos(ctx, videoIDs)
+	imageIDs = append(imageIDs, videoImageIDs...)
+	topicMap, _ := r.fetchTopics(ctx, topicIDs)
+	imageMap, err := r.fetchImages(ctx, imageIDs)
+	if err != nil {
+		return err
+	}
+
+	for i := range posts {
+		p := &posts[i]
+		id, _ := strconv.Atoi(p.ID)
+		p.Sections = sectionsMap[id]
+		p.SectionsInInputOrder = sectionsMap[id]
+		p.Categories = categoriesMap[id]
+		p.CategoriesInInputOrder = categoriesMap[id]
+		p.Writers = roleMapWriters[id]
+		p.WritersInInputOrder = roleMapWriters[id]
+		p.Photographers = roleMapPhotographers[id]
+		p.CameraMan = roleMapCamera[id]
+		p.Designers = roleMapDesigners[id]
+		p.Engineers = roleMapEngineers[id]
+		p.Vocals = roleMapVocals[id]
+		p.Tags = tagsMap[id]
+		p.TagsAlgo = tagsAlgoMap[id]
+		p.Relateds = relatedsMap[id]
+		p.RelatedsInInputOrder = relatedsInInputOrderMap[id]
+		if p.RelatedsInInputOrder == nil {
+			p.RelatedsInInputOrder = []Post{}
+		}
+		if idImg := getMetaInt(p.Metadata, "heroImageID"); idImg > 0 {
+			p.HeroImage = imageMap[idImg]
+		}
+		if idImg := getMetaInt(p.Metadata, "ogImageID"); idImg > 0 {
+			p.OgImage = imageMap[idImg]
+		}
+		if vid := getMetaInt(p.Metadata, "heroVideoID"); vid > 0 {
+			p.HeroVideo = videoMap[vid]
+		}
+		if tid := getMetaInt(p.Metadata, "topicsID"); tid > 0 {
+			if t, ok := topicMap[tid]; ok {
+				p.Topics = &t
+			}
+		}
+		if r1 := getMetaInt(p.Metadata, "relatedsOneID"); r1 > 0 {
+			if rp, ok := relatedSinglePosts[r1]; ok {
+				if idImg := getMetaInt(rp.Metadata, "heroImageID"); idImg > 0 {
+					rp.HeroImage = imageMap[idImg]
+				}
+				p.RelatedsOne = &rp
+			}
+		}
+		if r2 := getMetaInt(p.Metadata, "relatedsTwoID"); r2 > 0 {
+			if rp, ok := relatedSinglePosts[r2]; ok {
+				if idImg := getMetaInt(rp.Metadata, "heroImageID"); idImg > 0 {
+					rp.HeroImage = imageMap[idImg]
+				}
+				p.RelatedsTwo = &rp
+			}
+		}
+
+		// Set heroImage for related posts
+		for j := range p.Relateds {
+			if idImg := getMetaInt(p.Relateds[j].Metadata, "heroImageID"); idImg > 0 {
+				p.Relateds[j].HeroImage = imageMap[idImg]
+			}
+		}
+		for j := range p.RelatedsInInputOrder {
+			if idImg := getMetaInt(p.RelatedsInInputOrder[j].Metadata, "heroImageID"); idImg > 0 {
+				p.RelatedsInInputOrder[j].HeroImage = imageMap[idImg]
+			}
+		}
+	}
 	return nil
 }
 
-func (r *Repo) EnrichTopics(ctx context.Context, topics []Topic, fields map[string]bool) error {
+func (r *Repo) enrichTopics(ctx context.Context, topics []Topic) error {
 	if len(topics) == 0 {
 		return nil
 	}
@@ -1835,73 +1750,56 @@ func (r *Repo) EnrichTopics(ctx context.Context, topics []Topic, fields map[stri
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	// 獲取 heroImage 和 og_image
 	imageIDs := []int{}
-	// heroImage / og_image
 	for _, t := range topics {
-		if fields["heroImage"] {
-			if id := getMetaInt(t.Metadata, "heroImageID"); id > 0 {
-				imageIDs = append(imageIDs, id)
-			}
+		if id := getMetaInt(t.Metadata, "heroImageID"); id > 0 {
+			imageIDs = append(imageIDs, id)
 		}
-		if fields["og_image"] {
-			if id := getMetaInt(t.Metadata, "ogImageID"); id > 0 {
-				imageIDs = append(imageIDs, id)
-			}
+		if id := getMetaInt(t.Metadata, "ogImageID"); id > 0 {
+			imageIDs = append(imageIDs, id)
 		}
 	}
 
-	// tags
-	var tagsMap map[int][]Tag
-	if fields["tags"] || fields["tagsCount"] {
-		tagsMap, _ = r.FetchTopicTags(ctx, topicIDs)
+	// 獲取 tags
+	tagsMap, _ := r.fetchTopicTags(ctx, topicIDs)
+
+	// 獲取 slideshow_images
+	slideshowMap, slideshowImageIDs, _ := r.fetchTopicSlideshowImages(ctx, topicIDs)
+	imageIDs = append(imageIDs, slideshowImageIDs...)
+
+	// 獲取 images
+	imageMap, err := r.fetchImages(ctx, imageIDs)
+	if err != nil {
+		return err
 	}
 
-	// slideshow_images
-	var slideshowMap map[int][]Photo
-	var slideshowImageIDs []int
-	if fields["slideshow_images"] {
-		slideshowMap, slideshowImageIDs, _ = r.FetchTopicSlideshowImages(ctx, topicIDs)
-		imageIDs = append(imageIDs, slideshowImageIDs...)
-	}
-
-	// fetch images
-	var imageMap map[int]*Photo
-	if len(imageIDs) > 0 {
-		var err error
-		imageMap, err = r.FetchImages(ctx, imageIDs)
-		if err != nil {
-			return err
-		}
-	}
-
+	// 組裝資料
 	for i := range topics {
 		t := &topics[i]
 		id, _ := strconv.Atoi(t.ID)
 
-		if fields["heroImage"] {
-			if idImg := getMetaInt(t.Metadata, "heroImageID"); idImg > 0 {
-				t.HeroImage = imageMap[idImg]
-			}
-		}
-		if fields["og_image"] {
-			if idImg := getMetaInt(t.Metadata, "ogImageID"); idImg > 0 {
-				t.OgImage = imageMap[idImg]
-			}
+		// 設置 heroImage
+		if idImg := getMetaInt(t.Metadata, "heroImageID"); idImg > 0 {
+			t.HeroImage = imageMap[idImg]
 		}
 
-		if tagsMap != nil {
-			t.Tags = tagsMap[id]
+		// 設置 og_image
+		if idImg := getMetaInt(t.Metadata, "ogImageID"); idImg > 0 {
+			t.OgImage = imageMap[idImg]
 		}
 
-		if slideshowMap != nil {
-			t.SlideshowImages = slideshowMap[id]
-			t.SlideshowImagesInOrder = slideshowMap[id]
-		}
+		// 設置 tags
+		t.Tags = tagsMap[id]
+
+		// 設置 slideshow_images
+		t.SlideshowImages = slideshowMap[id]
+		t.SlideshowImagesInOrder = slideshowMap[id]
 	}
 	return nil
 }
 
-func (r *Repo) FetchSections(ctx context.Context, postIDs []int) (map[int][]Section, error) {
+func (r *Repo) fetchSections(ctx context.Context, postIDs []int) (map[int][]Section, error) {
 	result := map[int][]Section{}
 	if len(postIDs) == 0 {
 		return result, nil
@@ -1923,7 +1821,7 @@ func (r *Repo) FetchSections(ctx context.Context, postIDs []int) (map[int][]Sect
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchCategories(ctx context.Context, postIDs []int) (map[int][]Category, error) {
+func (r *Repo) fetchCategories(ctx context.Context, postIDs []int) (map[int][]Category, error) {
 	result := map[int][]Category{}
 	if len(postIDs) == 0 {
 		return result, nil
@@ -1945,7 +1843,7 @@ func (r *Repo) FetchCategories(ctx context.Context, postIDs []int) (map[int][]Ca
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchContacts(ctx context.Context, table string, postIDs []int) (map[int][]Contact, error) {
+func (r *Repo) fetchContacts(ctx context.Context, table string, postIDs []int) (map[int][]Contact, error) {
 	result := map[int][]Contact{}
 	if len(postIDs) == 0 {
 		return result, nil
@@ -1967,7 +1865,7 @@ func (r *Repo) FetchContacts(ctx context.Context, table string, postIDs []int) (
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchTags(ctx context.Context, table string, postIDs []int) (map[int][]Tag, error) {
+func (r *Repo) fetchTags(ctx context.Context, table string, postIDs []int) (map[int][]Tag, error) {
 	result := map[int][]Tag{}
 	if len(postIDs) == 0 {
 		return result, nil
@@ -1989,7 +1887,7 @@ func (r *Repo) FetchTags(ctx context.Context, table string, postIDs []int) (map[
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchRelatedPosts(ctx context.Context, postIDs []int) (map[int][]Post, []int, error) {
+func (r *Repo) fetchRelatedPosts(ctx context.Context, postIDs []int) (map[int][]Post, []int, error) {
 	result := map[int][]Post{}
 	imageIDs := []int{}
 	if len(postIDs) == 0 {
@@ -2029,7 +1927,7 @@ func (r *Repo) FetchRelatedPosts(ctx context.Context, postIDs []int) (map[int][]
 	return result, imageIDs, rows.Err()
 }
 
-func (r *Repo) FetchPostsByIDs(ctx context.Context, ids []int) ([]Post, []int, error) {
+func (r *Repo) fetchPostsByIDs(ctx context.Context, ids []int) ([]Post, []int, error) {
 	result := []Post{}
 	imageIDs := []int{}
 	if len(ids) == 0 {
@@ -2121,7 +2019,7 @@ func (r *Repo) fetchRelatedsByManualOrder(ctx context.Context, manualOrder []map
 	return result, imageIDs, nil
 }
 
-func (r *Repo) FetchVideos(ctx context.Context, videoIDs []int) (map[int]*Video, []int, error) {
+func (r *Repo) fetchVideos(ctx context.Context, videoIDs []int) (map[int]*Video, []int, error) {
 	result := map[int]*Video{}
 	imageIDs := []int{}
 	if len(videoIDs) == 0 {
@@ -2151,7 +2049,7 @@ func (r *Repo) FetchVideos(ctx context.Context, videoIDs []int) (map[int]*Video,
 	return result, imageIDs, rows.Err()
 }
 
-func (r *Repo) FetchTopics(ctx context.Context, ids []int) (map[int]Topic, error) {
+func (r *Repo) fetchTopics(ctx context.Context, ids []int) (map[int]Topic, error) {
 	result := map[int]Topic{}
 	if len(ids) == 0 {
 		return result, nil
@@ -2172,7 +2070,7 @@ func (r *Repo) FetchTopics(ctx context.Context, ids []int) (map[int]Topic, error
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchImages(ctx context.Context, ids []int) (map[int]*Photo, error) {
+func (r *Repo) fetchImages(ctx context.Context, ids []int) (map[int]*Photo, error) {
 	result := map[int]*Photo{}
 	if len(ids) == 0 {
 		return result, nil
@@ -2200,14 +2098,14 @@ func (r *Repo) FetchImages(ctx context.Context, ids []int) (map[int]*Photo, erro
 				Height: int(im.height.Int64),
 			},
 		}
-		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64), int(im.height.Int64))
-		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webP", int(im.width.Int64), int(im.height.Int64))
+		photo.Resized = r.buildResizedURLs(im.fileID, im.ext)
+		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp")
 		result[im.id] = &photo
 	}
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchPartners(ctx context.Context, ids []int) (map[int]*Partner, error) {
+func (r *Repo) fetchPartners(ctx context.Context, ids []int) (map[int]*Partner, error) {
 	result := map[int]*Partner{}
 	if len(ids) == 0 {
 		return result, nil
@@ -2229,7 +2127,7 @@ func (r *Repo) FetchPartners(ctx context.Context, ids []int) (map[int]*Partner, 
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchExternalTags(ctx context.Context, table string, externalIDs []int) (map[int][]Tag, error) {
+func (r *Repo) fetchExternalTags(ctx context.Context, table string, externalIDs []int) (map[int][]Tag, error) {
 	result := map[int][]Tag{}
 	if len(externalIDs) == 0 {
 		return result, nil
@@ -2250,7 +2148,7 @@ func (r *Repo) FetchExternalTags(ctx context.Context, table string, externalIDs 
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchTopicTags(ctx context.Context, topicIDs []int) (map[int][]Tag, error) {
+func (r *Repo) fetchTopicTags(ctx context.Context, topicIDs []int) (map[int][]Tag, error) {
 	result := map[int][]Tag{}
 	if len(topicIDs) == 0 {
 		return result, nil
@@ -2272,7 +2170,7 @@ func (r *Repo) FetchTopicTags(ctx context.Context, topicIDs []int) (map[int][]Ta
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchExternalSections(ctx context.Context, externalIDs []int) (map[int][]Section, error) {
+func (r *Repo) fetchExternalSections(ctx context.Context, externalIDs []int) (map[int][]Section, error) {
 	result := map[int][]Section{}
 	if len(externalIDs) == 0 {
 		return result, nil
@@ -2294,7 +2192,7 @@ func (r *Repo) FetchExternalSections(ctx context.Context, externalIDs []int) (ma
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchExternalCategories(ctx context.Context, externalIDs []int) (map[int][]Category, error) {
+func (r *Repo) fetchExternalCategories(ctx context.Context, externalIDs []int) (map[int][]Category, error) {
 	result := map[int][]Category{}
 	if len(externalIDs) == 0 {
 		return result, nil
@@ -2316,7 +2214,7 @@ func (r *Repo) FetchExternalCategories(ctx context.Context, externalIDs []int) (
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchExternalGroups(ctx context.Context, externalIDs []int) (map[int][]Group, error) {
+func (r *Repo) fetchExternalGroups(ctx context.Context, externalIDs []int) (map[int][]Group, error) {
 	result := map[int][]Group{}
 	if len(externalIDs) == 0 {
 		return result, nil
@@ -2340,7 +2238,7 @@ func (r *Repo) FetchExternalGroups(ctx context.Context, externalIDs []int) (map[
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchExternalRelateds(ctx context.Context, externalIDs []int) (map[int][]Post, error) {
+func (r *Repo) fetchExternalRelateds(ctx context.Context, externalIDs []int) (map[int][]Post, error) {
 	result := map[int][]Post{}
 	if len(externalIDs) == 0 {
 		return result, nil
@@ -2371,7 +2269,7 @@ func (r *Repo) FetchExternalRelateds(ctx context.Context, externalIDs []int) (ma
 	return result, rows.Err()
 }
 
-func (r *Repo) FetchTopicSlideshowImages(ctx context.Context, topicIDs []int) (map[int][]Photo, []int, error) {
+func (r *Repo) fetchTopicSlideshowImages(ctx context.Context, topicIDs []int) (map[int][]Photo, []int, error) {
 	result := map[int][]Photo{}
 	imageIDs := []int{}
 	if len(topicIDs) == 0 {
@@ -2407,31 +2305,22 @@ func (r *Repo) FetchTopicSlideshowImages(ctx context.Context, topicIDs []int) (m
 				Height: int(im.height.Int64),
 			},
 		}
-		photo.Resized = r.buildResizedURLs(im.fileID, im.ext, int(im.width.Int64), int(im.height.Int64))
-		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webP", int(im.width.Int64), int(im.height.Int64))
+		photo.Resized = r.buildResizedURLs(im.fileID, im.ext)
+		photo.ResizedWebp = r.buildResizedURLs(im.fileID, "webp")
 		result[tid] = append(result[tid], photo)
 	}
 	return result, imageIDs, rows.Err()
 }
 
-type IntArray []int
-
-func (a IntArray) Value() (driver.Value, error) {
-	if len(a) == 0 {
-		return "{}", nil
-	}
-	parts := make([]string, len(a))
-	for i, v := range a {
-		parts[i] = strconv.Itoa(v)
-	}
-	return "{" + strings.Join(parts, ",") + "}", nil
-}
-
 func pqIntArray(ids []int) interface{} {
-	return IntArray(ids)
+	arr := make([]int64, len(ids))
+	for i, id := range ids {
+		arr[i] = int64(id)
+	}
+	return arr
 }
 
-func (r *Repo) buildResizedURLs(fileID, ext string, width, height int) Resized {
+func (r *Repo) buildResizedURLs(fileID, ext string) Resized {
 	if fileID == "" {
 		return Resized{}
 	}
@@ -2445,30 +2334,12 @@ func (r *Repo) buildResizedURLs(fileID, ext string, width, height int) Resized {
 		}
 		return fmt.Sprintf("%s/%s-%s.%s", host, fileID, size, extension)
 	}
-
-	// Match Node.js logic:
-	// - Landscape (width >= height): generate w480, w800, w1600, w2400 (skip w1200)
-	// - Portrait (width < height): generate w480, w800, w1200, w1600 (skip w2400)
-	isLandscape := width >= height
-
 	return Resized{
 		Original: makeURL("", ext),
 		W480:     makeURL("w480", ext),
 		W800:     makeURL("w800", ext),
-		W1200: func() string {
-			if isLandscape {
-				return ""
-			} else {
-				return makeURL("w1200", ext)
-			}
-		}(),
-		W1600: makeURL("w1600", ext),
-		W2400: func() string {
-			if isLandscape {
-				return makeURL("w2400", ext)
-			} else {
-				return ""
-			}
-		}(),
+		W1200:    makeURL("w1200", ext),
+		W1600:    makeURL("w1600", ext),
+		W2400:    makeURL("w2400", ext),
 	}
 }
