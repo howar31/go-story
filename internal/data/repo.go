@@ -1603,21 +1603,21 @@ func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	g, ctx := errgroup.WithContext(ctx)
+	var g errgroup.Group
 	var (
-		sectionsMap         map[int][]Section
-		categoriesMap       map[int][]Category
-		roleMapWriters      map[int][]Contact
+		sectionsMap          map[int][]Section
+		categoriesMap        map[int][]Category
+		roleMapWriters       map[int][]Contact
 		roleMapPhotographers map[int][]Contact
-		roleMapCamera       map[int][]Contact
-		roleMapDesigners    map[int][]Contact
-		roleMapEngineers    map[int][]Contact
-		roleMapVocals       map[int][]Contact
-		roleMaps            map[string]map[int][]Contact
-		tagsMap             map[int][]Tag
-		tagsAlgoMap         map[int][]Tag
-		relatedsMap         map[int][]Post
-		relatedImageIDs     []int
+		roleMapCamera        map[int][]Contact
+		roleMapDesigners     map[int][]Contact
+		roleMapEngineers     map[int][]Contact
+		roleMapVocals        map[int][]Contact
+		roleMaps             map[string]map[int][]Contact
+		tagsMap              map[int][]Tag
+		tagsAlgoMap          map[int][]Tag
+		relatedsMap          map[int][]Post
+		relatedImageIDs      []int
 	)
 	g.Go(func() error {
 		var err error
@@ -1951,36 +1951,14 @@ func (r *Repo) fetchCategories(ctx context.Context, postIDs []int) (map[int][]Ca
 	return result, rows.Err()
 }
 
-func (r *Repo) fetchContacts(ctx context.Context, table string, postIDs []int) (map[int][]Contact, error) {
-	result := map[int][]Contact{}
-	if len(postIDs) == 0 {
-		return result, nil
-	}
-	query := fmt.Sprintf(`SELECT t."B" as post_id, c.id, c.name FROM "%s" t JOIN "Contact" c ON c.id = t."A" WHERE t."B" = ANY($1)`, table)
-	rows, err := r.db.QueryContext(ctx, query, pqIntArray(postIDs))
-	if err != nil {
-		return result, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var pid int
-		var c Contact
-		if err := rows.Scan(&pid, &c.ID, &c.Name); err != nil {
-			return result, err
-		}
-		result[pid] = append(result[pid], c)
-	}
-	return result, rows.Err()
-}
-
 func (r *Repo) fetchContactsByRole(ctx context.Context, postIDs []int) (map[string]map[int][]Contact, error) {
 	result := map[string]map[int][]Contact{
-		"_Post_writers":      {},
+		"_Post_writers":       {},
 		"_Post_photographers": {},
-		"_Post_camera_man":   {},
-		"_Post_designers":    {},
-		"_Post_engineers":    {},
-		"_Post_vocals":       {},
+		"_Post_camera_man":    {},
+		"_Post_designers":     {},
+		"_Post_engineers":     {},
+		"_Post_vocals":        {},
 	}
 	if len(postIDs) == 0 {
 		return result, nil
@@ -2150,7 +2128,7 @@ func (r *Repo) fetchRelatedsByManualOrder(ctx context.Context, manualOrder []map
 	}
 
 	// Query posts by ids
-rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1) AND state IN ('published', 'invisible')`, pqIntArray(ids))
+	rows, err := r.db.QueryContext(ctx, `SELECT id, slug, title, "heroImage" FROM "Post" WHERE id = ANY($1) AND state IN ('published', 'invisible')`, pqIntArray(ids))
 	if err != nil {
 		return result, imageIDs, err
 	}
@@ -2414,7 +2392,7 @@ func (r *Repo) fetchExternalRelateds(ctx context.Context, externalIDs []int) (ma
 	if len(externalIDs) == 0 {
 		return result, nil
 	}
-query := `SELECT er."A" as external_id, p.id, p.slug, p.title, p."heroImage" FROM "_External_relateds" er JOIN "Post" p ON p.id = er."B" WHERE er."A" = ANY($1) AND p.state IN ('published', 'invisible')`
+	query := `SELECT er."A" as external_id, p.id, p.slug, p.title, p."heroImage" FROM "_External_relateds" er JOIN "Post" p ON p.id = er."B" WHERE er."A" = ANY($1) AND p.state IN ('published', 'invisible')`
 	rows, err := r.db.QueryContext(ctx, query, pqIntArray(externalIDs))
 	if err != nil {
 		return result, err
