@@ -305,15 +305,27 @@ type Repo struct {
 
 const timeLayoutMilli = "2006-01-02T15:04:05.000Z07:00"
 
-func NewDB(dsn string) (*sql.DB, error) {
+func NewDB(dsn string, maxOpenConns, maxIdleConns int, connMaxIdleTime time.Duration) (*sql.DB, error) {
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("parse dsn: %w", err)
 	}
 	conn := stdlib.OpenDB(*cfg)
-	conn.SetMaxOpenConns(10)
-	conn.SetMaxIdleConns(5)
-	conn.SetConnMaxIdleTime(5 * time.Minute)
+	if maxOpenConns <= 0 {
+		maxOpenConns = 20
+	}
+	if maxIdleConns <= 0 {
+		maxIdleConns = 10
+	}
+	if maxIdleConns > maxOpenConns {
+		maxIdleConns = maxOpenConns
+	}
+	if connMaxIdleTime <= 0 {
+		connMaxIdleTime = 5 * time.Minute
+	}
+	conn.SetMaxOpenConns(maxOpenConns)
+	conn.SetMaxIdleConns(maxIdleConns)
+	conn.SetConnMaxIdleTime(connMaxIdleTime)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := conn.PingContext(ctx); err != nil {

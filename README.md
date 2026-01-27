@@ -12,6 +12,9 @@
   - `REDIS_ENABLED`：是否啟用 Redis cache，預設 `false`
   - `REDIS_URL`：Redis 連線字串，例如 `redis://localhost:6379/0`（當 `REDIS_ENABLED=true` 時建議設定）
   - `REDIS_TTL`：Cache TTL（秒），預設 `3600`（1 小時）
+  - `DB_MAX_OPEN_CONNS`：DB 連線池最大連線數，預設 `20`
+  - `DB_MAX_IDLE_CONNS`：DB 連線池最大閒置連線數，預設 `10`
+  - `DB_CONN_MAX_IDLE_SECONDS`：DB 連線最大閒置秒數，預設 `300`
 
 ## 主要端點
 - `POST /api/graphql`：GraphQL 端點

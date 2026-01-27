@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"time"
 
 	"go-story/internal/config"
 	"go-story/internal/data"
@@ -16,7 +17,12 @@ func main() {
 		log.Fatalf("config error: %v", err)
 	}
 
-	db, err := data.NewDB(cfg.DatabaseURL)
+	db, err := data.NewDB(
+		cfg.DatabaseURL,
+		cfg.DBMaxOpenConns,
+		cfg.DBMaxIdleConns,
+		time.Duration(cfg.DBConnMaxIdleSeconds)*time.Second,
+	)
 	if err != nil {
 		log.Fatalf("failed to connect db: %v", err)
 	}

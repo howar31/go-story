@@ -26,6 +26,12 @@ type Config struct {
 	RedisURL string
 	// REDIS_TTL: Cache TTL (秒)，預設為 3600 (選填)
 	RedisTTL int
+	// DB_MAX_OPEN_CONNS: DB 連線池最大連線數，預設 20 (選填)
+	DBMaxOpenConns int
+	// DB_MAX_IDLE_CONNS: DB 連線池最大閒置連線數，預設 10 (選填)
+	DBMaxIdleConns int
+	// DB_CONN_MAX_IDLE_SECONDS: DB 連線最大閒置秒數，預設 300 (選填)
+	DBConnMaxIdleSeconds int
 }
 
 // Load reads required environment variables.
@@ -87,6 +93,41 @@ func Load() (Config, error) {
 		cfg.RedisTTL = ttl
 	} else {
 		cfg.RedisTTL = 3600 // 預設 1 小時
+	}
+
+	// 解析 DB 連線池設定
+	dbMaxOpenStr := os.Getenv("DB_MAX_OPEN_CONNS")
+	if dbMaxOpenStr != "" {
+		n, err := strconv.Atoi(dbMaxOpenStr)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid DB_MAX_OPEN_CONNS value: %v", err)
+		}
+		cfg.DBMaxOpenConns = n
+	} else {
+		cfg.DBMaxOpenConns = 20
+	}
+	dbMaxIdleStr := os.Getenv("DB_MAX_IDLE_CONNS")
+	if dbMaxIdleStr != "" {
+		n, err := strconv.Atoi(dbMaxIdleStr)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid DB_MAX_IDLE_CONNS value: %v", err)
+		}
+		cfg.DBMaxIdleConns = n
+	} else {
+		cfg.DBMaxIdleConns = 10
+	}
+	if cfg.DBMaxIdleConns > cfg.DBMaxOpenConns && cfg.DBMaxOpenConns > 0 {
+		cfg.DBMaxIdleConns = cfg.DBMaxOpenConns
+	}
+	dbConnMaxIdleStr := os.Getenv("DB_CONN_MAX_IDLE_SECONDS")
+	if dbConnMaxIdleStr != "" {
+		n, err := strconv.Atoi(dbConnMaxIdleStr)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid DB_CONN_MAX_IDLE_SECONDS value: %v", err)
+		}
+		cfg.DBConnMaxIdleSeconds = n
+	} else {
+		cfg.DBConnMaxIdleSeconds = 300
 	}
 
 	return cfg, nil
