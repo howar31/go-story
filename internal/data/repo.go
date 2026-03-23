@@ -173,10 +173,16 @@ type Post struct {
 	OgDescription          string           `json:"og_description"`
 	HiddenAdvertised       bool             `json:"hiddenAdvertised"`
 	IsAdvertised           bool             `json:"isAdvertised"`
-	IsFeatured             bool             `json:"isFeatured"`
-	Topics                 *Topic           `json:"topics"`
-	ManualOrderOfRelateds  []map[string]any `json:"-"`
-	Metadata               map[string]any   `json:"-"`
+	IsFeatured                 bool             `json:"isFeatured"`
+	Topics                     *Topic           `json:"topics"`
+	RelatedVideos              []Video          `json:"related_videos"`
+	RelatedVideosInInputOrder  []Video          `json:"relatedVideosInInputOrder"`
+	ManualOrderOfSections      []map[string]any `json:"manualOrderOfSections"`
+	ManualOrderOfCategories    []map[string]any `json:"manualOrderOfCategories"`
+	ManualOrderOfWriters       []map[string]any `json:"manualOrderOfWriters"`
+	ManualOrderOfRelateds      []map[string]any `json:"manualOrderOfRelateds"`
+	ManualOrderOfRelatedVideos []map[string]any `json:"manualOrderOfRelatedVideos"`
+	Metadata                   map[string]any   `json:"-"`
 }
 
 type External struct {
@@ -438,7 +444,7 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 	}
 
 	sb := strings.Builder{}
-	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo", "manualOrderOfRelateds" FROM "Post" p`)
+	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo", "manualOrderOfSections", "manualOrderOfCategories", "manualOrderOfWriters", "manualOrderOfRelateds", "manualOrderOfRelatedVideos" FROM "Post" p`)
 
 	conds := []string{}
 	args := []interface{}{}
@@ -550,7 +556,11 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 			relatedsTwoID            sql.NullInt64
 			briefRaw                 []byte
 			contentRaw               []byte
-			manualOrderOfRelatedsRaw []byte
+			manualOrderOfSectionsRaw      []byte
+			manualOrderOfCategoriesRaw    []byte
+			manualOrderOfWritersRaw       []byte
+			manualOrderOfRelatedsRaw      []byte
+			manualOrderOfRelatedVideosRaw []byte
 		)
 		if err := rows.Scan(
 			&dbID,
@@ -579,7 +589,11 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 			&ogImageID,
 			&relatedsOneID,
 			&relatedsTwoID,
+			&manualOrderOfSectionsRaw,
+			&manualOrderOfCategoriesRaw,
+			&manualOrderOfWritersRaw,
 			&manualOrderOfRelatedsRaw,
+			&manualOrderOfRelatedVideosRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -593,7 +607,11 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 		p.Brief = decodeJSONBytes(briefRaw)
 		p.Content = decodeJSONBytes(contentRaw)
 		p.TrimmedContent = p.Content
+		p.ManualOrderOfSections = decodeJSONArray(manualOrderOfSectionsRaw)
+		p.ManualOrderOfCategories = decodeJSONArray(manualOrderOfCategoriesRaw)
+		p.ManualOrderOfWriters = decodeJSONArray(manualOrderOfWritersRaw)
 		p.ManualOrderOfRelateds = decodeJSONArray(manualOrderOfRelatedsRaw)
+		p.ManualOrderOfRelatedVideos = decodeJSONArray(manualOrderOfRelatedVideosRaw)
 		p.Metadata = map[string]any{
 			"heroImageID":   nullableInt(heroImageID),
 			"ogImageID":     nullableInt(ogImageID),
@@ -729,7 +747,7 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 	}
 
 	sb := strings.Builder{}
-	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo", "manualOrderOfRelateds" FROM "Post" p WHERE `)
+	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo", "manualOrderOfSections", "manualOrderOfCategories", "manualOrderOfWriters", "manualOrderOfRelateds", "manualOrderOfRelatedVideos" FROM "Post" p WHERE `)
 	args := []interface{}{}
 	argIdx := 1
 	if where.ID != nil {
@@ -760,7 +778,11 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 		relatedsTwoID            sql.NullInt64
 		briefRaw                 []byte
 		contentRaw               []byte
-		manualOrderOfRelatedsRaw []byte
+		manualOrderOfSectionsRaw      []byte
+		manualOrderOfCategoriesRaw    []byte
+		manualOrderOfWritersRaw       []byte
+		manualOrderOfRelatedsRaw      []byte
+		manualOrderOfRelatedVideosRaw []byte
 	)
 
 	err := r.db.QueryRowContext(ctx, sb.String(), args...).Scan(
@@ -790,7 +812,11 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 		&ogImageID,
 		&relatedsOneID,
 		&relatedsTwoID,
+		&manualOrderOfSectionsRaw,
+		&manualOrderOfCategoriesRaw,
+		&manualOrderOfWritersRaw,
 		&manualOrderOfRelatedsRaw,
+		&manualOrderOfRelatedVideosRaw,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -808,7 +834,11 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 	p.Brief = decodeJSONBytes(briefRaw)
 	p.Content = decodeJSONBytes(contentRaw)
 	p.TrimmedContent = p.Content
+	p.ManualOrderOfSections = decodeJSONArray(manualOrderOfSectionsRaw)
+	p.ManualOrderOfCategories = decodeJSONArray(manualOrderOfCategoriesRaw)
+	p.ManualOrderOfWriters = decodeJSONArray(manualOrderOfWritersRaw)
 	p.ManualOrderOfRelateds = decodeJSONArray(manualOrderOfRelatedsRaw)
+	p.ManualOrderOfRelatedVideos = decodeJSONArray(manualOrderOfRelatedVideosRaw)
 	p.Metadata = map[string]any{
 		"heroImageID":   nullableInt(heroImageID),
 		"ogImageID":     nullableInt(ogImageID),
@@ -1525,6 +1555,99 @@ func decodeJSONArray(raw []byte) []map[string]any {
 	return arr
 }
 
+func orderSectionsByManual(sections []Section, manual []map[string]any) []Section {
+	if len(manual) == 0 {
+		return sections
+	}
+	byID := make(map[string]Section, len(sections))
+	for _, s := range sections {
+		byID[s.ID] = s
+	}
+	out := make([]Section, 0, len(manual))
+	for _, item := range manual {
+		if idStr, ok := item["id"].(string); ok {
+			if s, ok := byID[idStr]; ok {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+func orderCategoriesByManual(categories []Category, manual []map[string]any) []Category {
+	if len(manual) == 0 {
+		return categories
+	}
+	byID := make(map[string]Category, len(categories))
+	for _, c := range categories {
+		byID[c.ID] = c
+	}
+	out := make([]Category, 0, len(manual))
+	for _, item := range manual {
+		if idStr, ok := item["id"].(string); ok {
+			if c, ok := byID[idStr]; ok {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+func orderContactsByManual(contacts []Contact, manual []map[string]any) []Contact {
+	if len(manual) == 0 {
+		return contacts
+	}
+	byID := make(map[string]Contact, len(contacts))
+	for _, c := range contacts {
+		byID[c.ID] = c
+	}
+	out := make([]Contact, 0, len(manual))
+	for _, item := range manual {
+		if idStr, ok := item["id"].(string); ok {
+			if c, ok := byID[idStr]; ok {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+func orderVideosByManual(videos []Video, manual []map[string]any) []Video {
+	if len(manual) == 0 {
+		return videos
+	}
+	byID := make(map[string]Video, len(videos))
+	for _, v := range videos {
+		byID[v.ID] = v
+	}
+	out := make([]Video, 0, len(manual))
+	for _, item := range manual {
+		if idStr, ok := item["id"].(string); ok {
+			if v, ok := byID[idStr]; ok {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+func mergeVideosFromMap(list []Video, videoMap map[int]*Video) []Video {
+	if len(list) == 0 {
+		return []Video{}
+	}
+	out := make([]Video, len(list))
+	for i, v := range list {
+		if id, err := strconv.Atoi(v.ID); err == nil {
+			if full, ok := videoMap[id]; ok && full != nil {
+				out[i] = *full
+				continue
+			}
+		}
+		out[i] = v
+	}
+	return out
+}
+
 func nullableInt(v sql.NullInt64) int {
 	if v.Valid {
 		return int(v.Int64)
@@ -1630,6 +1753,7 @@ func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 		tagsAlgoMap          map[int][]Tag
 		relatedsMap          map[int][]Post
 		relatedImageIDs      []int
+		relatedVideosMap     map[int][]Video
 	)
 	g.Go(func() error {
 		var err error
@@ -1658,8 +1782,16 @@ func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 		relatedsMap, relatedImageIDs, err = r.fetchRelatedPosts(ctx, postIDs)
 		return err
 	})
+	g.Go(func() error {
+		var err error
+		relatedVideosMap, err = r.fetchRelatedVideosForPosts(ctx, postIDs)
+		return err
+	})
 	if err := g.Wait(); err != nil {
 		return err
+	}
+	if relatedVideosMap == nil {
+		relatedVideosMap = map[int][]Video{}
 	}
 	if roleMaps == nil {
 		roleMaps = map[string]map[int][]Contact{}
@@ -1779,6 +1911,13 @@ func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 			imageIDs = append(imageIDs, id)
 		}
 	}
+	for _, vlist := range relatedVideosMap {
+		for _, v := range vlist {
+			if id, err := strconv.Atoi(v.ID); err == nil && id > 0 {
+				videoIDs = append(videoIDs, id)
+			}
+		}
+	}
 
 	videoMap, videoImageIDs, _ := r.fetchVideos(ctx, videoIDs)
 	imageIDs = append(imageIDs, videoImageIDs...)
@@ -1792,11 +1931,23 @@ func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 		p := &posts[i]
 		id, _ := strconv.Atoi(p.ID)
 		p.Sections = sectionsMap[id]
-		p.SectionsInInputOrder = sectionsMap[id]
+		if len(p.ManualOrderOfSections) > 0 {
+			p.SectionsInInputOrder = orderSectionsByManual(sectionsMap[id], p.ManualOrderOfSections)
+		} else {
+			p.SectionsInInputOrder = sectionsMap[id]
+		}
 		p.Categories = categoriesMap[id]
-		p.CategoriesInInputOrder = categoriesMap[id]
+		if len(p.ManualOrderOfCategories) > 0 {
+			p.CategoriesInInputOrder = orderCategoriesByManual(categoriesMap[id], p.ManualOrderOfCategories)
+		} else {
+			p.CategoriesInInputOrder = categoriesMap[id]
+		}
 		p.Writers = roleMapWriters[id]
-		p.WritersInInputOrder = roleMapWriters[id]
+		if len(p.ManualOrderOfWriters) > 0 {
+			p.WritersInInputOrder = orderContactsByManual(roleMapWriters[id], p.ManualOrderOfWriters)
+		} else {
+			p.WritersInInputOrder = roleMapWriters[id]
+		}
 		p.Photographers = roleMapPhotographers[id]
 		p.CameraMan = roleMapCamera[id]
 		p.Designers = roleMapDesigners[id]
@@ -1849,6 +2000,35 @@ func (r *Repo) enrichPosts(ctx context.Context, posts []Post) error {
 		for j := range p.RelatedsInInputOrder {
 			if idImg := getMetaInt(p.RelatedsInInputOrder[j].Metadata, "heroImageID"); idImg > 0 {
 				p.RelatedsInInputOrder[j].HeroImage = imageMap[idImg]
+			}
+		}
+
+		relVideos := relatedVideosMap[id]
+		p.RelatedVideos = mergeVideosFromMap(relVideos, videoMap)
+		if len(p.ManualOrderOfRelatedVideos) > 0 {
+			p.RelatedVideosInInputOrder = orderVideosByManual(p.RelatedVideos, p.ManualOrderOfRelatedVideos)
+		} else {
+			p.RelatedVideosInInputOrder = p.RelatedVideos
+		}
+		if p.RelatedVideosInInputOrder == nil {
+			p.RelatedVideosInInputOrder = []Video{}
+		}
+		for j := range p.RelatedVideos {
+			if p.RelatedVideos[j].HeroImage != nil {
+				if idImg := getMetaInt(p.RelatedVideos[j].HeroImage.Metadata, "heroImageID"); idImg > 0 {
+					if img := imageMap[idImg]; img != nil {
+						p.RelatedVideos[j].HeroImage = img
+					}
+				}
+			}
+		}
+		for j := range p.RelatedVideosInInputOrder {
+			if p.RelatedVideosInInputOrder[j].HeroImage != nil {
+				if idImg := getMetaInt(p.RelatedVideosInInputOrder[j].HeroImage.Metadata, "heroImageID"); idImg > 0 {
+					if img := imageMap[idImg]; img != nil {
+						p.RelatedVideosInInputOrder[j].HeroImage = img
+					}
+				}
 			}
 		}
 	}
@@ -2086,6 +2266,39 @@ func (r *Repo) fetchRelatedPosts(ctx context.Context, postIDs []int) (map[int][]
 		result[pid] = append(result[pid], rp)
 	}
 	return result, imageIDs, rows.Err()
+}
+
+func (r *Repo) fetchRelatedVideosForPosts(ctx context.Context, postIDs []int) (map[int][]Video, error) {
+	result := map[int][]Video{}
+	if len(postIDs) == 0 {
+		return result, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT rv."A" as post_id, v.id, v."urlOriginal", v."heroImage"
+		FROM "_Post_related_videos" rv
+		JOIN "Video" v ON v.id = rv."B"
+		WHERE rv."A" = ANY($1)`, pqIntArray(postIDs))
+	if err != nil {
+		return result, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pid int
+		var v Video
+		var dbID int
+		var hero sql.NullInt64
+		if err := rows.Scan(&pid, &dbID, &v.VideoSrc, &hero); err != nil {
+			return result, err
+		}
+		v.ID = strconv.Itoa(dbID)
+		if hero.Valid {
+			v.HeroImage = &Photo{}
+			v.HeroImage.ImageFile = ImageFile{}
+			v.HeroImage.Metadata = map[string]any{"heroImageID": int(hero.Int64)}
+		}
+		result[pid] = append(result[pid], v)
+	}
+	return result, rows.Err()
 }
 
 func (r *Repo) fetchPostsByIDs(ctx context.Context, ids []int) ([]Post, []int, error) {

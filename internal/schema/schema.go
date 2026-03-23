@@ -756,6 +756,48 @@ func Build(repo *data.Repo) (graphql.Schema, error) {
 						return normalizePost(p.Source).Topics, nil
 					},
 				},
+				"manualOrderOfSections": &graphql.Field{
+					Type: jsonScalar,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						return normalizePost(p.Source).ManualOrderOfSections, nil
+					},
+				},
+				"manualOrderOfCategories": &graphql.Field{
+					Type: jsonScalar,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						return normalizePost(p.Source).ManualOrderOfCategories, nil
+					},
+				},
+				"manualOrderOfWriters": &graphql.Field{
+					Type: jsonScalar,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						return normalizePost(p.Source).ManualOrderOfWriters, nil
+					},
+				},
+				"manualOrderOfRelateds": &graphql.Field{
+					Type: jsonScalar,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						return normalizePost(p.Source).ManualOrderOfRelateds, nil
+					},
+				},
+				"manualOrderOfRelatedVideos": &graphql.Field{
+					Type: jsonScalar,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						return normalizePost(p.Source).ManualOrderOfRelatedVideos, nil
+					},
+				},
+				"related_videos": &graphql.Field{
+					Type: graphql.NewList(videoType),
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						return normalizePost(p.Source).RelatedVideos, nil
+					},
+				},
+				"relatedVideosInInputOrder": &graphql.Field{
+					Type: graphql.NewList(videoType),
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						return normalizePost(p.Source).RelatedVideosInInputOrder, nil
+					},
+				},
 			}
 		}),
 	})
