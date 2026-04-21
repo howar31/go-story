@@ -86,6 +86,7 @@ func Build(repo *data.Repo) (graphql.Schema, error) {
 			"isAdult":    &graphql.InputObjectFieldConfig{Type: booleanFilterInput},
 			"isMember":   &graphql.InputObjectFieldConfig{Type: booleanFilterInput},
 			"isFeatured": &graphql.InputObjectFieldConfig{Type: booleanFilterInput},
+			"auto_faq":   &graphql.InputObjectFieldConfig{Type: booleanFilterInput},
 			"topics": &graphql.InputObjectFieldConfig{Type: graphql.NewInputObject(graphql.InputObjectConfig{
 				Name: "PostTopicsWhereInput",
 				Fields: graphql.InputObjectConfigFieldMap{
@@ -132,6 +133,7 @@ func Build(repo *data.Repo) (graphql.Schema, error) {
 			"publishedDate": &graphql.InputObjectFieldConfig{Type: orderDirectionEnum},
 			"updatedAt":     &graphql.InputObjectFieldConfig{Type: orderDirectionEnum},
 			"title":         &graphql.InputObjectFieldConfig{Type: orderDirectionEnum},
+			"auto_faq":      &graphql.InputObjectFieldConfig{Type: orderDirectionEnum},
 		},
 	})
 
@@ -748,6 +750,18 @@ func Build(repo *data.Repo) (graphql.Schema, error) {
 					Type: graphql.Boolean,
 					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 						return normalizePost(p.Source).IsFeatured, nil
+					},
+				},
+				"auto_faq": &graphql.Field{
+					Type: graphql.Boolean,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						return normalizePost(p.Source).AutoFAQ, nil
+					},
+				},
+				"faqs_algo": &graphql.Field{
+					Type: jsonScalar,
+					Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+						return normalizePost(p.Source).FAQsAlgo, nil
 					},
 				},
 				"topics": &graphql.Field{

@@ -174,6 +174,8 @@ type Post struct {
 	HiddenAdvertised       bool             `json:"hiddenAdvertised"`
 	IsAdvertised           bool             `json:"isAdvertised"`
 	IsFeatured                 bool             `json:"isFeatured"`
+	AutoFAQ                    bool             `json:"auto_faq"`
+	FAQsAlgo                   any              `json:"faqs_algo"`
 	Topics                     *Topic           `json:"topics"`
 	RelatedVideos              []Video          `json:"related_videos"`
 	RelatedVideosInInputOrder  []Video          `json:"relatedVideosInInputOrder"`
@@ -267,6 +269,7 @@ type PostWhereInput struct {
 	IsAdult    *BooleanFilter              `mapstructure:"isAdult"`
 	IsMember   *BooleanFilter              `mapstructure:"isMember"`
 	IsFeatured *BooleanFilter              `mapstructure:"isFeatured"`
+	AutoFAQ    *BooleanFilter              `mapstructure:"auto_faq"`
 	Topics     *PostTopicsWhereInput       `mapstructure:"topics"`
 }
 
@@ -444,7 +447,7 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 	}
 
 	sb := strings.Builder{}
-	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo", "manualOrderOfSections", "manualOrderOfCategories", "manualOrderOfWriters", "manualOrderOfRelateds", "manualOrderOfRelatedVideos" FROM "Post" p`)
+	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo", "manualOrderOfSections", "manualOrderOfCategories", "manualOrderOfWriters", "manualOrderOfRelateds", "manualOrderOfRelatedVideos", "auto_faq", "faqs_algo" FROM "Post" p`)
 
 	conds := []string{}
 	args := []interface{}{}
@@ -477,6 +480,11 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 		if where.IsMember != nil && where.IsMember.Equals != nil {
 			conds = append(conds, fmt.Sprintf(`"isMember" = $%d`, argIdx))
 			args = append(args, *where.IsMember.Equals)
+			argIdx++
+		}
+		if where.AutoFAQ != nil && where.AutoFAQ.Equals != nil {
+			conds = append(conds, fmt.Sprintf(`"auto_faq" = $%d`, argIdx))
+			args = append(args, *where.AutoFAQ.Equals)
 			argIdx++
 		}
 		if where.Sections != nil && where.Sections.Some != nil {
@@ -561,6 +569,8 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 			manualOrderOfWritersRaw       []byte
 			manualOrderOfRelatedsRaw      []byte
 			manualOrderOfRelatedVideosRaw []byte
+			autoFAQ                  bool
+			faqsAlgoRaw              []byte
 		)
 		if err := rows.Scan(
 			&dbID,
@@ -594,6 +604,8 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 			&manualOrderOfWritersRaw,
 			&manualOrderOfRelatedsRaw,
 			&manualOrderOfRelatedVideosRaw,
+			&autoFAQ,
+			&faqsAlgoRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -612,6 +624,8 @@ func (r *Repo) QueryPosts(ctx context.Context, where *PostWhereInput, orders []O
 		p.ManualOrderOfWriters = decodeJSONArray(manualOrderOfWritersRaw)
 		p.ManualOrderOfRelateds = decodeJSONArray(manualOrderOfRelatedsRaw)
 		p.ManualOrderOfRelatedVideos = decodeJSONArray(manualOrderOfRelatedVideosRaw)
+		p.AutoFAQ = autoFAQ
+		p.FAQsAlgo = decodeJSONAny(faqsAlgoRaw)
 		p.Metadata = map[string]any{
 			"heroImageID":   nullableInt(heroImageID),
 			"ogImageID":     nullableInt(ogImageID),
@@ -682,6 +696,11 @@ func (r *Repo) QueryPostsCount(ctx context.Context, where *PostWhereInput) (int,
 			args = append(args, *where.IsMember.Equals)
 			argIdx++
 		}
+		if where.AutoFAQ != nil && where.AutoFAQ.Equals != nil {
+			conds = append(conds, fmt.Sprintf(`"auto_faq" = $%d`, argIdx))
+			args = append(args, *where.AutoFAQ.Equals)
+			argIdx++
+		}
 		if where.Sections != nil && where.Sections.Some != nil {
 			sub := "EXISTS (SELECT 1 FROM \"_Post_sections\" ps JOIN \"Section\" s ON s.id = ps.\"B\" WHERE ps.\"A\" = p.id"
 			if where.Sections.Some.Slug != nil && where.Sections.Some.Slug.Equals != nil {
@@ -747,7 +766,7 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 	}
 
 	sb := strings.Builder{}
-	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo", "manualOrderOfSections", "manualOrderOfCategories", "manualOrderOfWriters", "manualOrderOfRelateds", "manualOrderOfRelatedVideos" FROM "Post" p WHERE `)
+	sb.WriteString(`SELECT id, slug, title, subtitle, state, style, "isMember", "isAdult", "publishedDate", "updatedAt", COALESCE("heroCaption",'') as heroCaption, COALESCE("extend_byline",'') as extend_byline, "heroImage", "heroVideo", brief, content, COALESCE(redirect,'') as redirect, COALESCE(og_title,'') as og_title, COALESCE(og_description,'') as og_description, "hiddenAdvertised", "isAdvertised", "isFeatured", topics, "og_image", "relatedsOne", "relatedsTwo", "manualOrderOfSections", "manualOrderOfCategories", "manualOrderOfWriters", "manualOrderOfRelateds", "manualOrderOfRelatedVideos", "auto_faq", "faqs_algo" FROM "Post" p WHERE `)
 	args := []interface{}{}
 	argIdx := 1
 	if where.ID != nil {
@@ -783,6 +802,8 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 		manualOrderOfWritersRaw       []byte
 		manualOrderOfRelatedsRaw      []byte
 		manualOrderOfRelatedVideosRaw []byte
+		autoFAQ                  bool
+		faqsAlgoRaw              []byte
 	)
 
 	err := r.db.QueryRowContext(ctx, sb.String(), args...).Scan(
@@ -817,6 +838,8 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 		&manualOrderOfWritersRaw,
 		&manualOrderOfRelatedsRaw,
 		&manualOrderOfRelatedVideosRaw,
+		&autoFAQ,
+		&faqsAlgoRaw,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -839,6 +862,8 @@ func (r *Repo) QueryPostByUnique(ctx context.Context, where *PostWhereUniqueInpu
 	p.ManualOrderOfWriters = decodeJSONArray(manualOrderOfWritersRaw)
 	p.ManualOrderOfRelateds = decodeJSONArray(manualOrderOfRelatedsRaw)
 	p.ManualOrderOfRelatedVideos = decodeJSONArray(manualOrderOfRelatedVideosRaw)
+	p.AutoFAQ = autoFAQ
+	p.FAQsAlgo = decodeJSONAny(faqsAlgoRaw)
 	p.Metadata = map[string]any{
 		"heroImageID":   nullableInt(heroImageID),
 		"ogImageID":     nullableInt(ogImageID),
@@ -1555,6 +1580,20 @@ func decodeJSONArray(raw []byte) []map[string]any {
 	return arr
 }
 
+// decodeJSONAny decodes a raw JSON value without presuming object or array shape.
+// Used for generic JSON columns (e.g. Post.faqs_algo) whose structure is defined
+// externally and may be either object or array.
+func decodeJSONAny(raw []byte) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return nil
+	}
+	return v
+}
+
 func orderSectionsByManual(sections []Section, manual []map[string]any) []Section {
 	if len(manual) == 0 {
 		return sections
@@ -1682,6 +1721,8 @@ func buildOrderClause(rule OrderRule) string {
 		return fmt.Sprintf(`"updatedAt" %s`, dir)
 	case "title":
 		return fmt.Sprintf(`"title" %s`, dir)
+	case "auto_faq":
+		return fmt.Sprintf(`"auto_faq" %s`, dir)
 	default:
 		return `"publishedDate" DESC`
 	}

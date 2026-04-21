@@ -74,4 +74,8 @@ docker run --rm -p 8080:8080 \
 - 預設會將 posts / externals 的 `state` 套用 `published` 過濾。
 - externals 預設排序過濾掉 `publishedDate` 為 null。
 - relateds/relatedsOne/relatedsTwo 會依 `_Post_relateds` 雙向關聯填入。
+- `Post` 的欄位命名與型別以 Keystone (`Lilith/packages/mirrormedia/schema.graphql`) 為準；`snake_case` 欄位(例如 `auto_faq`、`faqs_algo`、`og_title`)直接沿用,不改駝峰。
+- 目前暴露的 FAQ 欄位:`auto_faq: Boolean`(是否啟用自動 FAQ)、`faqs_algo: JSON`(由外部 data service 回填的 FAQ JSON);兩者皆可讀,`auto_faq` 亦可用於 `PostWhereInput` / `PostOrderByInput`,`faqs_algo` 不可 filter/order(與 Keystone 行為一致)。
+- 當 `Post` schema 有新增/變更欄位且部署環境啟用 Redis 時,需清掉 `posts:*` 與 `post:unique:*`(或 `FLUSHDB`),否則舊 cache 會吞掉新欄位直到 TTL 過期。
+- 詳細架構、欄位對齊表與新增欄位工作流見 `SPEC.md`;Claude Code 相關使用慣例見 `CLAUDE.md`。
 
